@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72" fill="none">
+  <circle cx="36" cy="36" r="35" fill="#171C2E" stroke="#4C6EF5" stroke-width="1.5"/>
+  <circle cx="36" cy="36" r="7" fill="#20C5D8"/>
+  <circle cx="36" cy="36" r="7" fill="#20C5D8" opacity=".3" style="filter:blur(4px)"/>
+  <ellipse cx="36" cy="36" rx="20" ry="8" stroke="#4C6EF5" stroke-width="1.5" fill="none"/>
+  <ellipse cx="36" cy="36" rx="20" ry="8" stroke="#748FFC" stroke-width="1.5" fill="none" opacity=".6" transform="rotate(60 36 36)"/>
+  <ellipse cx="36" cy="36" rx="20" ry="8" stroke="#748FFC" stroke-width="1.5" fill="none" opacity=".6" transform="rotate(120 36 36)"/>
+</svg>

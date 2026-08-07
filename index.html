@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Values Irradiation WEB-210</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" type="image/png" href="img/mosquito_icon.png">
+<link rel="stylesheet" href="css/app.css">
+<!-- Librerías para exportar el Historial a Excel y PDF (se cargan bajo demanda desde el navegador, no afectan al resto de la app) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js" defer></script>
+</head>
+<body>
+<div id="app">
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- RESULT DIALOG -->
+<div class="rdiag" id="rdiag">
+  <div class="rbox">
+    <h3>Tiempo de irradiación</h3>
+    <div class="rbig" id="rTime">—</div>
+    <div class="runit">segundos</div>
+    <div class="rsub" id="rSub"></div>
+    <button class="btn bp bw" onclick="closeR()">Aceptar</button>
+  </div>
+</div>
+
+<!-- EXPORT FORMAT DIALOG -->
+<div class="exov" id="exov">
+  <div class="exbox">
+    <div class="exhd">
+      <span style="font-size:22px">📦</span>
+      <h3>Exportar datos</h3>
+      <span class="exctx" id="exctx">Formulario</span>
+    </div>
+    <div class="exfmt">
+      <button class="exfmt-btn" onclick="doExport('csv')">
+        <span class="eico">📊</span>
+        <span class="etxt"><span class="etit">CSV</span><span class="esub">Compatible con Excel y hojas de cálculo</span></span>
+        <span class="earr">›</span>
+      </button>
+      <button class="exfmt-btn" onclick="doExport('json')">
+        <span class="eico">🗂</span>
+        <span class="etxt"><span class="etit">JSON</span><span class="esub">Datos estructurados completos</span></span>
+        <span class="earr">›</span>
+      </button>
+      <button class="exfmt-btn" onclick="doExport('txt')">
+        <span class="eico">📝</span>
+        <span class="etxt"><span class="etit">TXT</span><span class="esub">Texto plano formateado, ideal para imprimir</span></span>
+        <span class="earr">›</span>
+      </button>
+    </div>
+    <div class="exft"><button class="btn bo bw bs" onclick="closeExDlg()">Cancelar</button></div>
+  </div>
+</div>
+
+<!-- SAVE CONFIRM DIALOG -->
+<div class="scov" id="scov">
+  <div class="scbox">
+    <div class="schd"><span style="font-size:24px">✅</span><h3>Exportación completada</h3></div>
+    <div class="scbdy">
+      <div class="fileinfo">
+        <div class="fext" id="scFext">CSV</div>
+        <div class="fdetails">
+          <div class="fname" id="scFname">archivo.csv</div>
+          <div class="fmeta" id="scFmeta">—</div>
+        </div>
+      </div>
+      <div class="terminal" id="scTerm"></div>
+    </div>
+    <div class="scft"><button class="btn bt" onclick="closeScDlg()">Aceptar</button></div>
+  </div>
+</div>
+
+<!-- URNAS MODAL -->
+<div class="ov" id="urnaModal">
+  <div class="modal">
+    <div class="mhd">
+      <div style="display:flex;flex-direction:column;gap:6px;flex:1">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <h3 style="font-family:var(--fh);font-size:17px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#fff">🏺 Registro de Urnas</h3>
+          <span id="mpill" style="display:none;background:rgba(255,255,255,.22);color:#fff;font-family:var(--fh);font-size:13px;font-weight:700;padding:4px 12px;border-radius:20px">Total: 0</span>
+        </div>
+        <div class="uchips" id="uchips">
+          <div class="uchip empty" id="chip-urna1" style="border-color:#4C6EF555">
+            <span style="width:7px;height:7px;border-radius:50%;background:#4C6EF5;flex-shrink:0"></span>Urna 1
+          </div>
+          <div class="uchip empty" id="chip-urna2" style="border-color:#2FB34455">
+            <span style="width:7px;height:7px;border-radius:50%;background:#2FB344;flex-shrink:0"></span>Urna 2
+          </div>
+          <div class="uchip empty" id="chip-urna3" style="border-color:#BE4BDB55">
+            <span style="width:7px;height:7px;border-radius:50%;background:#BE4BDB;flex-shrink:0"></span>Urna 3
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="utabs">
+      <button class="utab on" id="utab-urna1" style="color:#4C6EF5" onclick="switchUrna('urna1')">
+        <span class="utab-dot"></span>Urna 1
+      </button>
+      <button class="utab" id="utab-urna2" style="color:#2FB344" onclick="switchUrna('urna2')">
+        <span class="utab-dot"></span>Urna 2
+      </button>
+      <button class="utab" id="utab-urna3" style="color:#BE4BDB" onclick="switchUrna('urna3')">
+        <span class="utab-dot"></span>Urna 3
+      </button>
+    </div>
+    <div class="mbdy">
+      <div class="upanel on" id="upanel-urna1"></div>
+      <div class="upanel"    id="upanel-urna2"></div>
+      <div class="upanel"    id="upanel-urna3"></div>
+    </div>
+    <div class="mft">
+      <button class="btn bo bs" style="flex:1" onclick="prevUrna()">← Anterior</button>
+      <button class="btn bp"    style="flex:2;padding:11px" id="urnaNextBtn" onclick="nextUrna()">Siguiente →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ LOGIN ══════════ -->
+<div class="sc on" id="sl">
+  <div class="lb">
+    <div class="login-logo-wrap">
+      <img src="img/mosquito_logo_white.png" class="login-logo active" id="llogo0" alt="Mosquito Team logo">
+      <!-- 
+      <img src="img/mosquito_icon.png"       class="login-logo"        id="llogo1" alt="Mosquito Co-60 icon">
+      <img src="img/mosquito_logo_team.png"  class="login-logo"        id="llogo2" alt="Mosquito Team">
+      -->
+      <img src="img/logo_tie_mosquito.png"   class="login-logo"        id="llogo1" alt="Mosquito TIE Team">
+      <img src="img/Logo Tragsa.png"        class="login-logo"        id="llogo2" alt="Mosquito Tragsa team">
+      <img src="img/logo.svg"                class="login-logo"        id="llogo3" alt="Values Irradiation">
+    </div>
+    <div class="logo-dots">
+      <span class="ldot on" onclick="setLogo(0)"></span>
+      <span class="ldot"    onclick="setLogo(1)"></span>
+      <span class="ldot"    onclick="setLogo(2)"></span>
+      <span class="ldot"    onclick="setLogo(3)"></span>
+    </div>
+    <div class="ltit">Values Irradiation</div>
+    <div class="lsub">Control de irradiación Co-60 · WEB-210</div>
+    <div class="lerr" id="lerr"></div>
+    <div class="lok"  id="lok"></div>
+    <div class="fl">
+      <label>Usuario</label>
+      <input type="text" id="luser" placeholder="Introduce tu usuario" autocomplete="username" onkeydown="if(event.key==='Enter')lStep()">
+    </div>
+    <div class="fl" id="lpassF" style="display:none">
+      <label>Contraseña</label>
+      <input type="password" id="lpass" placeholder="Contraseña" autocomplete="current-password" onkeydown="if(event.key==='Enter')lSubmit()">
+    </div>
+    <!-- Solo aparece cuando el usuario introducido no existe todavía -->
+    <div id="lregF" style="display:none">
+      <div class="fr2">
+        <div class="fl"><label>Nombre</label><input type="text" id="rNombre" placeholder="Nombre"></div>
+        <div class="fl"><label>1er apellido</label><input type="text" id="rAp1" placeholder="Primer apellido"></div>
+      </div>
+      <div class="fl"><label>2º apellido (opcional)</label><input type="text" id="rAp2" placeholder="Segundo apellido"></div>
+      <div class="fl"><label>Crea una contraseña</label><input type="password" id="rPass" placeholder="Contraseña" autocomplete="new-password"></div>
+      <div class="fl"><label>Confirma la contraseña</label><input type="password" id="rPass2" placeholder="Repite la contraseña" autocomplete="new-password" onkeydown="if(event.key==='Enter')lRegister()"></div>
+    </div>
+    <button class="btn bt bw" id="lbtn" onclick="lStep()">Continuar</button>
+    <button class="btn bo bs" id="lchg" style="display:none" onclick="lReset()">Cambiar usuario</button>
+    <div class="lcloud" id="lcloud"></div>
+    <div class="lft">by Heute schöne Tag · WEB-210</div>
+  </div>
+</div>
+
+<!-- ══════════ MENU ══════════ -->
+<div class="sc" id="smenu">
+  <div class="tb" style="padding-bottom:10px">
+    <div>
+      <div style="font-family:var(--fh);font-size:11px;color:var(--txt3);letter-spacing:.08em;text-transform:uppercase">Bienvenido</div>
+      <div style="font-family:var(--fh);font-size:20px;font-weight:700" id="muser">—</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span class="cloudbdg" id="cloudbdg" title="Estado de conexión con la nube">☁ …</span>
+      <div class="dbdg" id="dbdg">70 Gy</div>
+    </div>
+  </div>
+  <div class="mhero">
+    <div class="menu-logo-strip">
+      <img src="img/mosquito_icon.png" class="mlogo" alt="logo">
+      <img src="img/logo_tie_mosquito.png"       class="mlogo" alt="icon">
+      <img src="img/Logo Tragsa.png"  class="mlogo" alt="team">
+    </div>
+    <div class="mtit">Calculadora Co-60</div>
+    <div class="mdose">Dosis activa: <span id="mdose">70</span> Gy</div>
+    <div class="mcalc">
+      <label>Calcular tiempo de irradiación</label>
+      <div class="fl"><input type="date" id="mdate"></div>
+      <button class="btn bg bw" onclick="calcMenu()">⚡ Calcular tiempo</button>
+    </div>
+    <div class="mgrid">
+      <button class="btn bt" onclick="go('today')">Dosis hoy</button>
+      <button class="btn bt" onclick="go('month')">Dosis mes</button>
+      <button class="btn bt" onclick="go('weekly')">Tabla anual</button>
+      <button class="btn bo" onclick="go('settings')">⚙ Ajustes</button>
+    </div>
+  </div>
+  <div class="mbot">
+    <div class="micons">
+      <button class="nicn" onclick="go('form')" title="Formulario">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        <span>Formulario</span>
+        <span class="nbdg" id="nbf" style="display:none">0</span>
+      </button>
+      <button class="nicn" onclick="go('multidosis')" title="Multi-Dosis">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        <span>Multi-Dosis</span>
+      </button>
+      <button class="nicn" onclick="go('hist')" title="Historial">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+        <span>Historial</span>
+      </button>
+    </div>
+    <button class="btn br bs" onclick="if(confirm('¿Cerrar sesión?'))logout()">Cerrar sesión</button>
+  </div>
+</div>
+
+<!-- ══════════ FORM ══════════ -->
+<div class="sc" id="sform">
+  <div class="tb">
+    <h1>Datos Irradiación</h1>
+    <div class="sbdg" id="sbdg">0</div>
+  </div>
+  <div class="tabs">
+    <button class="tab on"  onclick="stab('urnas',this)">URNAS</button>
+    <button class="tab"     onclick="stab('transp',this)">TRANSP</button>
+    <button class="tab"     onclick="stab('temp',this)">TEMP</button>
+    <button class="tab"     onclick="stab('irradia',this)">IRRADIA</button>
+    <button class="tab"     onclick="stab('obs',this)">OBS</button>
+  </div>
+  <div class="sa">
+
+    <!-- TAB URNAS -->
+    <div class="tp on" id="tp-urnas">
+      <div class="fl">
+        <label>Fecha irradiación</label>
+        <input type="date" id="fchIrr" oninput="onFecha()">
+      </div>
+      <div class="fr2">
+        <div class="fl"><label>Semana ISO (auto)</label>
+          <div class="cfr"><input type="text" id="semana" readonly placeholder="—"><span class="aut">auto</span></div>
+        </div>
+        <div class="fl"><label>Tasa Gy/s (auto)</label>
+          <div class="cfr"><input type="text" id="tasa" readonly placeholder="—"><span class="aut">auto</span></div>
+        </div>
+      </div>
+      <div class="ucenter">
+        <div class="totb" id="totBan" style="display:none">
+          <span class="totb-l">Total urnas</span>
+          <span class="totb-v" id="totVal">0</span>
+        </div>
+        <button class="burna" onclick="openUrna()">🏺 Urnas</button>
+      </div>
+    </div>
+
+    <!-- TAB TRANSP -->
+    <div class="tp" id="tp-transp">
+      <div class="fr2">
+        <div class="fl"><label>Conductor / Responsable</label>
+          <select id="fResp" onchange="onConductorChange()">
+            <option value="">— Selecciona conductor —</option>
+          </select></div>
+        <div class="fl"><label>Código (auto)</label>
+          <div class="cfr"><input type="text" id="fRespCod" readonly placeholder="—"><span class="aut">auto</span></div></div>
+      </div>
+      <div class="fr2">
+        <div class="fl"><label>H. ida inicio</label><input type="time" id="fHII"></div>
+        <div class="fl"><label>H. ida llegada</label><input type="time" id="fHIL"></div>
+      </div>
+      <div class="fr2">
+        <div class="fl"><label>H. vuelta inicio</label><input type="time" id="fHVI"></div>
+        <div class="fl"><label>H. vuelta llegada</label><input type="time" id="fHVL"></div>
+      </div>
+    </div>
+
+    <!-- TAB TEMP -->
+    <div class="tp" id="tp-temp">
+      <div class="fl"><label>Tª inicial (°C)</label>
+        <input type="number" id="fTi" step="0.1" placeholder="ej. 22.5" oninput="calcTm()"></div>
+      <div class="fl"><label>Tª final (°C)</label>
+        <input type="number" id="fTf" step="0.1" placeholder="ej. 23.0" oninput="calcTm()"></div>
+      <div class="fl"><label>Tª media (auto)</label>
+        <div class="cfr"><input type="text" id="fTm" readonly placeholder="—"><span class="aut">auto</span></div></div>
+    </div>
+
+    <!-- TAB IRRADIA -->
+    <div class="tp" id="tp-irradia">
+      <div class="fl"><label>Irradiador</label>
+        <input type="text" id="fIrr" placeholder="Nombre / ID del irradiador"></div>
+      <div class="fl"><label>Tiempo exposición (s) — auto</label>
+        <div class="cfr"><input type="text" id="fTexp" readonly placeholder="—"><span class="aut">auto</span></div></div>
+      <div class="fl"><label>Dosímetros</label>
+        <div class="cfr" id="dosWrap">
+          <input type="number" id="fDos" placeholder="Nº dosímetros" min="1">
+        </div></div>
+      <div class="fr2">
+        <div class="fl"><label>H. inicio irradiación</label><input type="time" id="fHini"></div>
+        <div class="fl"><label>H. fin irradiación</label><input type="time" id="fHfin"></div>
+      </div>
+    </div>
+
+    <!-- TAB OBS -->
+    <div class="tp" id="tp-obs">
+      <div class="fl"><label>Observaciones</label>
+        <textarea id="fObs" placeholder="Escribe aquí tus observaciones…" rows="12"></textarea></div>
+    </div>
+
+  </div>
+  <div class="bb">
+    <button class="btn bo bs" onclick="go('menu')">← Volver</button>
+    <button class="btn bp bs" onclick="guardar()">Guardar <span id="gcnt"></span></button>
+    <button class="btn bor bs" id="bexp" onclick="openExDlg('form')" disabled>⬆ Exportar</button>
+    <button class="btn bo bs" onclick="go('records')">Registros <span id="rcnt"></span></button>
+  </div>
+</div>
+
+<!-- ══════════ RECORDS ══════════ -->
+<div class="sc" id="srecords">
+  <div class="tb">
+    <button class="back" onclick="go('form')">← Volver</button>
+    <h1>Registros guardados</h1>
+    <button class="btn br bs" style="margin-left:auto" onclick="clearRecs()">🗑 Limpiar</button>
+  </div>
+  <div class="sa" id="recList"><div class="remp">No hay registros</div></div>
+</div>
+
+<!-- ══════════ HISTORIAL (nube, filtrado por fechas y otros campos) ══════════ -->
+<div class="sc" id="shist">
+  <div class="tb">
+    <button class="back" onclick="go('menu')">← Volver</button>
+    <h1>Historial</h1>
+  </div>
+  <div class="sa" style="display:flex;flex-direction:column;gap:14px">
+    <div class="fr2">
+      <div class="fl"><label>Desde</label><input type="date" id="hDesde"></div>
+      <div class="fl"><label>Hasta</label><input type="date" id="hHasta"></div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn bp bs" style="flex:1" onclick="buscarHistorial()">🔍 Buscar</button>
+      <button class="btn bo bs" onclick="filtroHistorialRapido()">Últimos 30 días</button>
+    </div>
+
+    <hr class="xdiv">
+    <div style="font-size:12px;color:var(--txt3);font-family:var(--fh);letter-spacing:.05em;text-transform:uppercase">Filtrar resultados</div>
+    <div class="fr2">
+      <div class="fl"><label>Conductor</label>
+        <select id="hConductor" onchange="aplicarFiltrosHistorial()"><option value="">Todos</option></select></div>
+      <div class="fl"><label>Guardado por</label>
+        <select id="hUsuario" onchange="aplicarFiltrosHistorial()"><option value="">Todos</option></select></div>
+    </div>
+    <div class="fr2">
+      <div class="fl"><label>Semana ISO</label><input type="number" id="hSemana" placeholder="Ej. 29" oninput="aplicarFiltrosHistorial()"></div>
+      <div class="fl"><label>Buscar texto</label><input type="text" id="hTexto" placeholder="Irradiador, observaciones…" oninput="aplicarFiltrosHistorial()"></div>
+    </div>
+
+    <div class="lft" id="histNote"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn bor bs" style="flex:1" onclick="exportHistCSV()">⬇ CSV</button>
+      <button class="btn bor bs" style="flex:1" onclick="exportHistXLSX()">⬇ Excel</button>
+      <button class="btn bor bs" style="flex:1" onclick="exportHistPDF()">⬇ PDF</button>
+    </div>
+
+    <div style="display:flex;gap:8px">
+      <button class="btn bp bs" id="hTabLista" style="flex:1" onclick="cambiarVistaHistorial('lista')">📋 Lista</button>
+      <button class="btn bo bs" id="hTabGraf" style="flex:1" onclick="cambiarVistaHistorial('graf')">📊 Gráficas</button>
+    </div>
+    <div class="fl" id="hGrafSelWrap" style="display:none">
+      <label>Tipo de gráfica</label>
+      <select id="hChartTipo" onchange="dibujarGraficaHistorial()">
+        <option value="temp">Temperaturas (inicial / final / media)</option>
+        <option value="tasa">Tasa de dosis (Gy/s)</option>
+        <option value="texp">Tiempo de exposición (s)</option>
+        <option value="urnas">Nº de urnas</option>
+        <option value="semana">Registros por semana</option>
+      </select>
+    </div>
+
+    <div id="histList"><div class="remp">Elige un rango de fechas y pulsa "Buscar"</div></div>
+    <div id="histChartWrap" style="display:none;background:var(--surf);border-radius:var(--rlg);padding:14px">
+      <canvas id="histChart" height="220"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ TODAY ══════════ -->
+<div class="sc" id="stoday">
+  <div class="tb">
+    <button class="back" onclick="go('menu')">← Volver</button>
+    <h1>Dosis hoy</h1>
+  </div>
+  <div class="sa" style="display:flex;flex-direction:column;gap:14px">
+    <div class="fl"><label>Dosis deseada (Gy)</label>
+      <input type="number" id="tdose" placeholder="Introduce la dosis en Gy" min="1" step="1"></div>
+    <button class="btn bp bw" onclick="calcToday()">⚡ Calcular tiempo</button>
+    <div id="todayRes" style="display:none">
+      <div class="todres">
+        <div style="font-size:12px;color:var(--txt3);margin-bottom:8px;font-family:var(--fh);letter-spacing:.05em;text-transform:uppercase">Tiempo de irradiación</div>
+        <div class="bigT" id="tdresT">—</div>
+        <div class="bigU">segundos</div>
+        <div style="margin-top:8px;font-size:12px;color:var(--txt3)" id="tdresD"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ MONTH ══════════ -->
+<div class="sc" id="smonth">
+  <div class="tb">
+    <button class="back" onclick="go('menu')">← Volver</button>
+    <h1 id="mthTitle">Dosis mes</h1>
+    <button class="btn bor bs" style="margin-left:auto" onclick="openExDlg('month')">⬆ Exportar</button>
+  </div>
+  <div class="sa">
+    <div class="twrap">
+      <table class="dtbl"><thead><tr><th>Día</th><th>Tasa (Gy/s)</th><th>Tiempo (s)</th></tr></thead>
+      <tbody id="monBody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ WEEKLY ══════════ -->
+<div class="sc" id="sweekly">
+  <div class="tb">
+    <button class="back" onclick="go('menu')">← Volver</button>
+    <h1 id="wkTitle">Tabla anual</h1>
+    <button class="btn bor bs" style="margin-left:auto" onclick="openExDlg('weekly')">⬆ Exportar</button>
+  </div>
+  <div class="sa">
+    <div class="twrap">
+      <table class="dtbl"><thead><tr><th>Sem.</th><th>Rango</th><th>Tiempo (s)</th></tr></thead>
+      <tbody id="wkBody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ MULTIDOSIS ══════════ -->
+<div class="sc" id="smultidosis">
+  <div class="tb">
+    <button class="back" onclick="go('menu')">← Volver</button>
+    <div style="flex:1">
+      <div style="font-family:var(--fh);font-size:19px;font-weight:700;letter-spacing:.04em">MULTI-DOSIS</div>
+      <div style="font-size:12px;color:var(--txt3);margin-top:1px">Tiempo calculado para la fecha de hoy</div>
+    </div>
+    <button class="btn br bs" onclick="clearMD()">✕ Limpiar</button>
+  </div>
+  <div class="sa" style="display:flex;flex-direction:column;gap:12px" id="mdCont"></div>
+  <div class="bb" style="justify-content:space-between">
+    <button class="btn bo bs" onclick="go('menu')">← Volver</button>
+    <div class="mdsummary" id="mdSumm" style="display:none">
+      <span>⚡</span><span id="mdSummTxt"></span>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ SETTINGS ══════════ -->
+<div class="sc" id="ssettings">
+  <div class="tb">
+    <button class="back" onclick="go('menu')">← Volver</button>
+    <h1>Ajustes</h1>
+  </div>
+  <div class="sa" style="display:flex;flex-direction:column;gap:16px">
+    <div class="ssc">
+      <h3>Dosis activa</h3>
+      <div class="fl"><label>Dosis (Gy)</label>
+        <input type="number" id="sdose" value="70" min="1" step="1"></div>
+      <button class="btn bt bw" onclick="saveDose()">Actualizar dosis</button>
+    </div>
+        <div class="ssc">
+      <h3>Apariencia</h3>
+      <p class="thhint">Cambia los colores y la tipografía de toda la app.</p>
+      <div class="thseg" role="group" aria-label="Selector de tema">
+        <button type="button" id="thLight" class="thbtn" aria-pressed="false" onclick="setTheme('light')">
+          <span class="thico">☀</span><span>Diurno</span>
+        </button>
+        <button type="button" id="thDark" class="thbtn" aria-pressed="true" onclick="setTheme('dark')">
+          <span class="thico">🌙</span><span>Nocturno</span>
+        </button>
+      </div>
+    </div>
+    <div class="ssc">
+      <h3>Notificaciones</h3>
+      <p class="thhint">Recibe un aviso cuando alguien guarde un registro nuevo (con la app abierta, comprobando cada 25 s).</p>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-size:13px;color:var(--txt3)">Estado: <strong id="notifEstado" style="color:var(--txt)">—</strong></span>
+        <button class="btn bt bs" id="notifBtn" style="display:none" onclick="pedirPermisoNotificaciones()">🔔 Activar</button>
+      </div>
+    </div>
+    <div class="ssc" id="admSec">
+      <h3>Gestión de usuarios</h3>
+      <div class="fl"><label>Usuario (nick)</label>
+        <input type="text" id="nusr" placeholder="Ej. jnavarro"></div>
+      <div class="fr2">
+        <div class="fl"><label>Nombre</label><input type="text" id="nnombre" placeholder="Nombre"></div>
+        <div class="fl"><label>1er apellido</label><input type="text" id="nap1" placeholder="Primer apellido"></div>
+      </div>
+      <div class="fl"><label>2º apellido (opcional)</label><input type="text" id="nap2" placeholder="Segundo apellido"></div>
+      <div class="fl"><label>Contraseña</label>
+        <input type="password" id="npass" placeholder="Contraseña"></div>
+      <div class="fl"><label>Rol</label>
+        <select id="nrole"><option value="user">Usuario</option><option value="admin">Admin</option></select></div>
+      <button class="btn bp bw" onclick="addUsr()">Añadir usuario</button>
+      <hr class="xdiv">
+      <div id="usrList"></div>
+      <div class="lft" id="usrSyncNote" style="margin-top:6px"></div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /#app -->
+<script src="js/app.js"></script>
+</body>
+</html>
