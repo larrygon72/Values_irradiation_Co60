@@ -2,9 +2,19 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Values Irradiation WEB-210</title>
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- PWA: permite "Añadir a pantalla de inicio" en móvil y instalar en PC -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0B1330">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Irradiation">
+<link rel="apple-touch-icon" href="img/icon-192.png">
+
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="icon" type="image/png" href="img/mosquito_icon.png">
 <link rel="stylesheet" href="css/app.css">
 <!-- Librerías para exportar el Historial a Excel y PDF (se cargan bajo demanda desde el navegador, no afectan al resto de la app) -->
@@ -17,6 +27,18 @@
 <div id="app">
 
 <!-- TOAST -->
+<!-- ══════════ CONFIRMACIÓN (reemplaza al confirm() nativo del navegador) ══════════ -->
+<div class="rdiag" id="confirmOv">
+  <div class="rbox" style="max-width:340px;text-align:left">
+    <h3 id="confirmTitle" style="text-align:center;text-transform:none;letter-spacing:.02em">Confirmar</h3>
+    <p id="confirmMsg" style="font-size:14px;color:var(--txt2);margin:10px 0 22px;line-height:1.5;text-align:center"></p>
+    <div style="display:flex;gap:10px">
+      <button class="btn bo bw" onclick="_confirmClose(false)">Cancelar</button>
+      <button class="btn br bw" id="confirmOkBtn" onclick="_confirmClose(true)">Eliminar</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <!-- RESULT DIALOG -->
@@ -218,7 +240,7 @@
         <span>Historial</span>
       </button>
     </div>
-    <button class="btn br bs" onclick="if(confirm('¿Cerrar sesión?'))logout()">Cerrar sesión</button>
+    <button class="btn br bs" onclick="confirmLogout()">Cerrar sesión</button>
   </div>
 </div>
 
@@ -249,6 +271,7 @@
         </div>
         <div class="fl"><label>Tasa Gy/s (auto)</label>
           <div class="cfr"><input type="text" id="tasa" readonly placeholder="—"><span class="aut">auto</span></div>
+          <span class="fhint">Se calcula sola con la dosis y el tiempo de exposición.</span>
         </div>
       </div>
       <div class="ucenter">
@@ -268,7 +291,8 @@
             <option value="">— Selecciona conductor —</option>
           </select></div>
         <div class="fl"><label>Código (auto)</label>
-          <div class="cfr"><input type="text" id="fRespCod" readonly placeholder="—"><span class="aut">auto</span></div></div>
+          <div class="cfr"><input type="text" id="fRespCod" readonly placeholder="—"><span class="aut">auto</span></div>
+          <span class="fhint">1ª letra del nombre + 1ª de cada apellido (ej. Josep Navarro Navarro → JNN).</span></div>
       </div>
       <div class="fr2">
         <div class="fl"><label>H. ida inicio</label><input type="time" id="fHII"></div>
@@ -287,7 +311,8 @@
       <div class="fl"><label>Tª final (°C)</label>
         <input type="number" id="fTf" step="0.1" placeholder="ej. 23.0" oninput="calcTm()"></div>
       <div class="fl"><label>Tª media (auto)</label>
-        <div class="cfr"><input type="text" id="fTm" readonly placeholder="—"><span class="aut">auto</span></div></div>
+        <div class="cfr"><input type="text" id="fTm" readonly placeholder="—"><span class="aut">auto</span></div>
+        <span class="fhint">Media entre la temperatura inicial y la final.</span></div>
     </div>
 
     <!-- TAB IRRADIA -->
@@ -295,7 +320,8 @@
       <div class="fl"><label>Irradiador</label>
         <input type="text" id="fIrr" placeholder="Nombre / ID del irradiador"></div>
       <div class="fl"><label>Tiempo exposición (s) — auto</label>
-        <div class="cfr"><input type="text" id="fTexp" readonly placeholder="—"><span class="aut">auto</span></div></div>
+        <div class="cfr"><input type="text" id="fTexp" readonly placeholder="—"><span class="aut">auto</span></div>
+        <span class="fhint">Se calcula con la dosis programada y la tasa del día.</span></div>
       <div class="fl"><label>Dosímetros</label>
         <div class="cfr" id="dosWrap">
           <input type="number" id="fDos" placeholder="Nº dosímetros" min="1">
@@ -315,7 +341,7 @@
   </div>
   <div class="bb">
     <button class="btn bo bs" onclick="go('menu')">← Volver</button>
-    <button class="btn bp bs" onclick="guardar()">Guardar <span id="gcnt"></span></button>
+    <button class="btn bp bs" id="gbtn" onclick="guardar()">Guardar <span id="gcnt"></span></button>
     <button class="btn bor bs" id="bexp" onclick="openExDlg('form')" disabled>⬆ Exportar</button>
     <button class="btn bo bs" onclick="go('records')">Registros <span id="rcnt"></span></button>
   </div>
@@ -477,10 +503,13 @@
       <p class="thhint">Cambia los colores y la tipografía de toda la app.</p>
       <div class="thseg" role="group" aria-label="Selector de tema">
         <button type="button" id="thLight" class="thbtn" aria-pressed="false" onclick="setTheme('light')">
-          <span class="thico">☀</span><span>Diurno</span>
+          <span class="thico">☀</span><span>Claro</span>
         </button>
-        <button type="button" id="thDark" class="thbtn" aria-pressed="true" onclick="setTheme('dark')">
-          <span class="thico">🌙</span><span>Nocturno</span>
+        <button type="button" id="thDark" class="thbtn" aria-pressed="false" onclick="setTheme('dark')">
+          <span class="thico">🌙</span><span>Oscuro</span>
+        </button>
+        <button type="button" id="thSystem" class="thbtn" aria-pressed="true" onclick="setTheme('system')">
+          <span class="thico">⚙</span><span>Sistema</span>
         </button>
       </div>
     </div>

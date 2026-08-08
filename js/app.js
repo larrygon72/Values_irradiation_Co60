@@ -35,6 +35,7 @@ const S = {
   histVista:'lista', histRaw:[], histFiltered:[],
   lastCheck:null
 };
+let _systemThemeMQ=null;
 
 const LS = {
   users()  { try{return JSON.parse(localStorage.getItem('vi_u')||'[]')}catch{return []} },
@@ -45,8 +46,11 @@ const LS = {
   setS(s)  { localStorage.setItem('vi_s',JSON.stringify(s)) },
   md()     { try{return JSON.parse(localStorage.getItem('vi_md')||'[0,0,0,0,0,0]')}catch{return [0,0,0,0,0,0]} },
   setMD(m) { localStorage.setItem('vi_md',JSON.stringify(m)) },
-  theme()    { return localStorage.getItem('vi_theme')||'dark' },
-  setTheme(t){ localStorage.setItem('vi_theme', t==='light'?'light':'dark') },
+  themePref(){
+    const saved = localStorage.getItem('vi_theme');
+    return (saved==='light'||saved==='dark'||saved==='system') ? saved : 'system';
+  },
+  setThemePref(t){ localStorage.setItem('vi_theme', (t==='light'||t==='dark')?t:'system') },
   // ── Sesión / nube ──
   token()     { return localStorage.getItem('vi_tok')||'' },
   setToken(t) { if(t) localStorage.setItem('vi_tok',t); else localStorage.removeItem('vi_tok') },
@@ -68,16 +72,21 @@ const API = '/api';
 
 async function apiPost(path, body) {
   let res;
+  const ctrl = new AbortController();
+  const timeoutId = setTimeout(()=>ctrl.abort(), 12000);
   try {
     res = await fetch(API + path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {})
+      body: JSON.stringify(body || {}),
+      signal: ctrl.signal
     });
   } catch (e) {
     const err = new Error('Sin conexión con el servidor');
     err.isNetwork = true;
     throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
   let data = null;
   try { data = await res.json(); } catch {}
@@ -247,11 +256,16 @@ function boot() {
   if(LS.users().length===0)
     LS.setU([{name:'Admin',pass:'Aedes',role:'admin',att:0,locked:false,nombre:'Admin',apellido1:'Admin',apellido2:''}]);
   S.dose=LS.dose(); S.staged=LS.staged(); S.md=LS.md();
-  applyTheme(LS.theme());
+  applyTheme(LS.themePref());
   updStagedUI();
   setCloudState(null);
   window.addEventListener('online', flushPending);
   setInterval(flushPending, 60000);
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', ()=>{
+      navigator.serviceWorker.register('sw.js').catch(()=>{});
+    });
+  }
 }
 
 // ── NAVIGATION ───────────────────────────────────────
@@ -288,17 +302,19 @@ async function lStep() {
   const name=document.getElementById('luser').value.trim();
   if(!name){showErr('Introduce un nombre de usuario');return;}
   showErr('');
+  setBtnLoading('lbtn', true, 'Comprobando…');
   let existe=false, bloqueado=false;
   try{
     const data=await apiPost('/auth',{action:'check',nick:name});
     existe=!!data.existe; bloqueado=!!data.bloqueado;
     setCloudState('ok');
   }catch(e){
-    if(!e.isNetwork){ setCloudState('err'); showErr(e.message); return; }
+    if(!e.isNetwork){ setCloudState('err'); setBtnLoading('lbtn', false); showErr(e.message); return; }
     setCloudState('off');
     const u=LS.users().find(u=>u.name.toLowerCase()===name.toLowerCase());
     existe=!!u; bloqueado=u?!!u.locked:false;
   }
+  setBtnLoading('lbtn', false);
   if(bloqueado){showErr('Acceso bloqueado. Contacta con el administrador.');return;}
 
   document.getElementById('luser').disabled=true;
@@ -322,11 +338,14 @@ async function lSubmit() {
   const name=document.getElementById('luser').value.trim();
   const pass=document.getElementById('lpass').value;
   if(!pass){showErr('Introduce la contraseña');return;}
+  setBtnLoading('lbtn', true, 'Entrando…');
   try{
     const data=await apiPost('/auth',{action:'login',nick:name,pass});
     setCloudState('ok');
+    setBtnLoading('lbtn', false);
     onAuthSuccess(data.usuario,data.token);
   }catch(e){
+    setBtnLoading('lbtn', false);
     if(e.isNetwork){ setCloudState('off'); loginLocalFallback(name,pass); return; }
     setCloudState('err'); showErr(e.message);
     document.getElementById('lpass').value='';
@@ -361,11 +380,14 @@ async function lRegister() {
   if(!nombre||!ap1){showErr('Introduce al menos el nombre y el primer apellido');return;}
   if(!pass||pass.length<4){showErr('La contraseña debe tener al menos 4 caracteres');return;}
   if(pass!==pass2){showErr('Las contraseñas no coinciden');return;}
+  setBtnLoading('lbtn', true, 'Creando cuenta…');
   try{
     const data=await apiPost('/auth',{action:'register',nick:name,pass,nombre,apellido1:ap1,apellido2:ap2});
     setCloudState('ok');
+    setBtnLoading('lbtn', false);
     onAuthSuccess(data.usuario,data.token);
   }catch(e){
+    setBtnLoading('lbtn', false);
     if(!e.isNetwork){ showErr(e.message); return; }
     setCloudState('off');
     const users=LS.users();
@@ -388,6 +410,7 @@ function onAuthSuccess(usuario, token) {
   startNotifPolling();
 }
 function lReset() {
+  delete _btnOrigLabel['lbtn'];
   document.getElementById('luser').disabled=false;
   document.getElementById('luser').value='';
   document.getElementById('lpass').value='';
@@ -596,7 +619,22 @@ function updUrnaSum() {
 }
 
 // ── FORM SAVE ─────────────────────────────────────────
-function guardar() {
+// ── Estado de carga en botones (spinner + deshabilitado) ──
+const _btnOrigLabel={};
+function setBtnLoading(id, loading, loadingText) {
+  const btn=document.getElementById(id);
+  if(!btn) return;
+  if(loading){
+    if(_btnOrigLabel[id]===undefined) _btnOrigLabel[id]=btn.innerHTML;
+    btn.disabled=true; btn.classList.add('loading');
+    btn.innerHTML=`<span class="spin"></span>${loadingText||'Espera…'}`;
+  } else {
+    btn.disabled=false; btn.classList.remove('loading');
+    if(_btnOrigLabel[id]!==undefined){ btn.innerHTML=_btnOrigLabel[id]; delete _btnOrigLabel[id]; }
+  }
+}
+
+async function guardar() {
   const t=urnaTotal();
   const tiV=parseFloat(document.getElementById('fTi').value);
   const tfV=parseFloat(document.getElementById('fTf').value);
@@ -632,9 +670,13 @@ function guardar() {
     // Metadatos
     at: new Date().toISOString(),
   };
+  setBtnLoading('gbtn', true, 'Guardando…');
   S.staged.push(rec); LS.setS(S.staged);
-  syncRecordToCloud(rec);
-  limpiarForm(); updStagedUI(); toast('✓ Registro guardado');
+  await syncRecordToCloud(rec);
+  limpiarForm();
+  setBtnLoading('gbtn', false);
+  updStagedUI();
+  toast('✓ Registro guardado');
 }
 function limpiarForm() {
   ['fchIrr','semana','tasa','fTexp','fResp','fRespCod','fHII','fHIL','fHVI','fHVL',
@@ -892,8 +934,10 @@ function renderRecs() {
       ${r.obs?`<div class="robs">📝 ${r.obs.substring(0,100)}${r.obs.length>100?'…':''}</div>`:''}</div>`;
   }).join('<div style="height:8px"></div>');
 }
-function clearRecs() {
-  if(!confirm('¿Eliminar todos los registros?')) return;
+async function clearRecs() {
+  const ok=await confirmDialog('¿Eliminar todos los registros guardados en este dispositivo?',
+    {title:'Eliminar registros',okText:'Eliminar todos',okClass:'br'});
+  if(!ok) return;
   S.staged=[]; LS.setS([]); updStagedUI(); renderRecs(); toast('Registros eliminados');
 }
 
@@ -903,7 +947,7 @@ async function buscarHistorial() {
   const hasta=document.getElementById('hHasta').value;
   const box=document.getElementById('histList');
   const note=document.getElementById('histNote');
-  box.innerHTML='<div class="remp">Buscando…</div>';
+  box.innerHTML='<div class="remp"><span class="spin"></span>Buscando…</div>';
   S.histRaw=[]; S.histFiltered=[];
   if(!LS.token()){
     box.innerHTML='<div class="remp">Inicia sesión con conexión a internet para consultar el historial de la nube.</div>';
@@ -983,7 +1027,9 @@ function renderHistorial(regs) {
   }).join('<div style="height:8px"></div>');
 }
 async function eliminarHistorialRegistro(id) {
-  if(!confirm('¿Eliminar este registro de la nube? No se puede deshacer.')) return;
+  const ok=await confirmDialog('¿Eliminar este registro de la nube? No se puede deshacer.',
+    {title:'Eliminar registro',okText:'Eliminar',okClass:'br'});
+  if(!ok) return;
   try{
     await apiPost('/registros',{action:'eliminar',token:LS.token(),payload:{id}});
     setCloudState('ok');
@@ -1205,7 +1251,7 @@ function clearMD(){S.md=[0,0,0,0,0,0];LS.setMD(S.md);renderMD();toast('Entradas 
 
 // ── SETTINGS ──────────────────────────────────────────
 function renderSettings() {
-  applyTheme(LS.theme());
+  applyTheme(LS.themePref());
   document.getElementById('sdose').value=S.dose;
   document.getElementById('admSec').style.display=S.isAdmin?'flex':'none';
   if(S.isAdmin) renderUsrs();
@@ -1352,7 +1398,9 @@ async function delUsr(nick) {
   if(nick.toLowerCase()==='admin' && (S.user||'').toLowerCase()!=='admin'){
     toast('El usuario "Admin" solo puede eliminarse a sí mismo'); return;
   }
-  if(!confirm(`¿Eliminar "${nick}"?`)) return;
+  const ok=await confirmDialog(`¿Eliminar el usuario "${nick}"? No se puede deshacer.`,
+    {title:'Eliminar usuario',okText:'Eliminar',okClass:'br'});
+  if(!ok) return;
   try{
     await apiPost('/usuarios',{action:'eliminar',token:LS.token(),payload:{nick}});
     setCloudState('ok');
@@ -1406,6 +1454,29 @@ function stopLogoRotation() {
 }
 
 // ── TOAST ─────────────────────────────────────────────
+// ── CONFIRMACIÓN (sustituye a confirm() nativo del navegador) ──
+let _confirmResolve=null;
+function confirmDialog(message, opts={}) {
+  return new Promise(resolve=>{
+    _confirmResolve=resolve;
+    document.getElementById('confirmMsg').textContent=message;
+    document.getElementById('confirmTitle').textContent=opts.title||'Confirmar';
+    const okBtn=document.getElementById('confirmOkBtn');
+    okBtn.textContent=opts.okText||'Eliminar';
+    okBtn.className='btn bw '+(opts.okClass||'br');
+    document.getElementById('confirmOv').classList.add('on');
+  });
+}
+function _confirmClose(result) {
+  document.getElementById('confirmOv').classList.remove('on');
+  if(_confirmResolve){ const r=_confirmResolve; _confirmResolve=null; r(result); }
+}
+async function confirmLogout() {
+  const ok=await confirmDialog('¿Seguro que quieres cerrar sesión?',
+    {title:'Cerrar sesión',okText:'Cerrar sesión',okClass:'br'});
+  if(ok) logout();
+}
+
 function toast(msg) {
   const t=document.getElementById('toast');
   t.textContent=msg; t.classList.add('on');
@@ -1419,18 +1490,34 @@ startLogoRotation();
 
 
 // ── THEME (diurno / nocturno) ────────────────────────
-function applyTheme(t){
-  const light = (t === 'light');
-  document.body.classList.toggle('theme-light', light);
-  const bL = document.getElementById('thLight');
-  const bD = document.getElementById('thDark');
-  if(bL) bL.setAttribute('aria-pressed', light ? 'true':'false');
-  if(bD) bD.setAttribute('aria-pressed', light ? 'false':'true');
+function resolveTheme(pref){
+  if(pref==='light'||pref==='dark') return pref;
+  // 'system': seguimos la preferencia del sistema operativo
+  if(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) return 'light';
+  return 'dark';
 }
-function setTheme(t){
-  const v = (t === 'light') ? 'light' : 'dark';
-  LS.setTheme(v);
+function applyTheme(pref){
+  const resolved=resolveTheme(pref);
+  document.body.classList.toggle('theme-light', resolved==='light');
+  const bL=document.getElementById('thLight'), bD=document.getElementById('thDark'), bS=document.getElementById('thSystem');
+  if(bL) bL.setAttribute('aria-pressed', pref==='light'?'true':'false');
+  if(bD) bD.setAttribute('aria-pressed', pref==='dark'?'true':'false');
+  if(bS) bS.setAttribute('aria-pressed', pref==='system'?'true':'false');
+
+  // Si el modo es "Sistema", escuchamos cambios en vivo (p.ej. el móvil pasa
+  // a modo oscuro por la noche) y actualizamos la app sin recargar.
+  if(_systemThemeMQ){ _systemThemeMQ.onchange=null; _systemThemeMQ=null; }
+  if(pref==='system' && window.matchMedia){
+    _systemThemeMQ=window.matchMedia('(prefers-color-scheme: light)');
+    _systemThemeMQ.onchange=()=>applyTheme('system');
+  }
+}
+function setTheme(pref){
+  const v=(pref==='light'||pref==='dark')?pref:'system';
+  LS.setThemePref(v);
   applyTheme(v);
-  if(typeof toast === 'function')
-    toast(v === 'light' ? '☀ Tema diurno activado' : '🌙 Tema nocturno activado');
+  if(typeof toast==='function'){
+    const MAP={light:'☀ Tema claro activado',dark:'🌙 Tema oscuro activado',system:'⚙ Siguiendo el tema del sistema'};
+    toast(MAP[v]);
+  }
 }

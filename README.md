@@ -263,6 +263,66 @@ usuario** ha guardado un registro nuevo, y si es así:
 > navegador y un pequeño servicio adicional — lo podemos montar cuando
 > quieras.
 
+## Mejoras de experiencia de usuario
+
+- **Diálogos de confirmación propios**: los "¿Eliminar...?" ya no usan la
+  ventana gris del navegador — tienen el mismo estilo que el resto de la
+  app, y funcionan igual en modo diurno y nocturno.
+- **Textos de ayuda**: los campos que se calculan solos (tasa, código de
+  conductor, temperatura media, tiempo de exposición) tienen ahora una
+  pequeña explicación debajo, pensada para quien usa la app por primera vez.
+- **App instalable (PWA)**: en el móvil se puede "Añadir a pantalla de
+  inicio" y se abre a pantalla completa, sin la barra del navegador, como
+  una app normal. También se puede instalar en PC (Chrome/Edge: icono de
+  instalar en la barra de direcciones). Además, un Service Worker guarda
+  una copia de la propia app (HTML/CSS/JS) para que cargue incluso sin
+  conexión desde el primer segundo — los datos siguen funcionando igual
+  que siempre (Supabase + localStorage), esto solo afecta a "la app en sí".
+- **Tema automático**: si nunca has tocado el interruptor de tema, la app
+  arranca con el modo claro u oscuro que ya tengas configurado en tu
+  móvil u ordenador. En cuanto lo cambias manualmente una vez, se queda
+  fijo con tu elección.
+- **Estados de carga**: la búsqueda del Historial y el botón "Entrar" del
+  login muestran un pequeño spinner mientras esperan respuesta del
+  servidor, en vez de quedarse "parados" sin más.
+- **Sin duplicados por doble clic**: el botón "Guardar" del formulario se
+  desactiva y muestra "Guardando…" mientras se sincroniza con la nube, y
+  se reactiva solo al terminar.
+
+## Fase 1 del rediseño profesional — Sistema de diseño base
+
+A partir de un encargo detallado de rediseño completo ("plataforma SaaS
+científica profesional"), se está aplicando en fases. La Fase 1 (sistema
+de diseño base) ya está lista:
+
+- **Paleta exacta**: Light = Royal Blue `#2563EB` → Sky `#38BDF8` →
+  Turquoise `#14B8A6`. Dark = Navy `#172554` → Lavender `#A78BFA` →
+  Aubergine `#6D28D9`. Los tonos más claros (Sky, Turquoise, Lavender)
+  tienen una variante "profunda" calculada por contraste WCAG para uso en
+  botones/badges con texto blanco — el color puro se reserva para
+  detalles, texto en degradado y acentos, tal y como pide el criterio de
+  "no abusar del degradado".
+- **Tipografía nueva**: Manrope (títulos), Inter (texto), IBM Plex Mono
+  (valores numéricos y campos automáticos — tasa, código de conductor,
+  temperaturas).
+- **Menos "HUD"**: se ha quitado el uppercase+tracking agresivo y los
+  resplandores de neón de botones, títulos y tablas, dejando sombras
+  suaves y texto en caja normal, como pide el punto 3-4 del encargo.
+- **Fondo neutro**: el degradado ya NO cubre toda la pantalla — se
+  reserva para el botón principal, el título de marca y algún acento
+  puntual (login), y el resto de la interfaz vuelve a ser blanca/neutra
+  en claro y navy suave en oscuro.
+- **Selector de tema de 3 vías**: Claro / Oscuro / **Sistema** (nuevo) en
+  Ajustes. En modo Sistema, si cambias el tema del móvil mientras tienes
+  la app abierta, se actualiza sola sin recargar.
+- Jerarquía de botones ampliada con la variante **Ghost** (sin fondo).
+
+**Quedan pendientes** las fases 2 a 5 del encargo (Dashboard + navegación
+con sidebar/bottom-nav, formulario con stepper y urnas como tarjetas,
+historial como tabla profesional con panel de detalle, y estadísticas/
+microinteracciones/accesibilidad) — son cambios estructurales grandes que
+se están abordando por partes para poder probar cada uno a fondo.
+
 ## Próximos pasos
 
 Con esto ya tienes: nube conectada, despliegue automático, gestión de

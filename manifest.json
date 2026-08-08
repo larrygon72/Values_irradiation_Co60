@@ -1,0 +1,17 @@
+{
+  "name": "Values Irradiation WEB-210",
+  "short_name": "Irradiation",
+  "description": "Gestión de dosimetría radiológica — irradiación con Cobalto-60",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0B1330",
+  "theme_color": "#0B1330",
+  "lang": "es",
+  "icons": [
+    { "src": "img/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "img/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
