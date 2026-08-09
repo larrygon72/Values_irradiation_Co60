@@ -161,6 +161,7 @@ function onConductorChange() {
   if (!sel || !codEl) return;
   const u = LS.driverCache().find(x => x.nick === sel.value);
   codEl.value = u ? (u.codigo || codigoConductor(u.nombre,u.apellido1,u.apellido2)) : '';
+  if(typeof updateStepperStatus==='function') updateStepperStatus();
 }
 
 // ── Cola de registros pendientes de sincronizar ──────
@@ -278,11 +279,19 @@ function go(id) {
   if(id==='weekly')     renderWeekly();
   if(id==='multidosis') renderMD();
   if(id==='settings')   renderSettings();
+  if(id==='users')      renderUsersScreen();
   if(id==='records')    renderRecs();
   if(id==='hist')       { cambiarVistaHistorial('lista'); filtroHistorialRapido(); }
-  if(id==='form')       { populateConductorSelect(); refreshDrivers().then(populateConductorSelect); }
+  if(id==='form')       { populateConductorSelect(); refreshDrivers().then(populateConductorSelect); renderUrnaCards(); updateStepperStatus(); }
   if(id==='sl')         { setLogo(0); startLogoRotation(); }
   else                  { stopLogoRotation(); }
+
+  document.getElementById('app').classList.toggle('authed', id!=='sl');
+  document.querySelectorAll('[data-nav]').forEach(b=>b.classList.toggle('active', b.dataset.nav===id));
+  document.getElementById('sidebarAdmin').style.display=S.isAdmin?'block':'none';
+  document.getElementById('drawerAdminLbl').style.display=S.isAdmin?'block':'none';
+  document.getElementById('drawerUsersLink').style.display=S.isAdmin?'block':'none';
+  closeDrawer();
 }
 function logout() {
   LS.setToken(''); LS.setSession(null);
@@ -290,6 +299,8 @@ function logout() {
   stopNotifPolling();
   go('sl');
 }
+function toggleDrawer(){ document.getElementById('drawer').classList.toggle('on'); document.getElementById('drawerOv').classList.toggle('on'); }
+function closeDrawer(){ document.getElementById('drawer').classList.remove('on'); document.getElementById('drawerOv').classList.remove('on'); }
 
 // ── LOGIN ─────────────────────────────────────────────
 // Paso 1: se comprueba en Supabase si el "nick" ya existe.
@@ -425,16 +436,62 @@ function lReset() {
 function showErr(m){const e=document.getElementById('lerr');if(!m){e.style.display='none';return;}e.textContent=m;e.style.display='block';document.getElementById('lok').style.display='none';}
 function showOk(m){const e=document.getElementById('lok');e.textContent=m;e.style.display='block';document.getElementById('lerr').style.display='none';}
 
-// ── MENU ──────────────────────────────────────────────
-function renderMenu() {
-  document.getElementById('muser').textContent=S.user||'—';
+// ── DASHBOARD ─────────────────────────────────────────
+function saludoHora() {
+  const h=new Date().getHours();
+  if(h<12) return 'Buenos días';
+  if(h<20) return 'Buenas tardes';
+  return 'Buenas noches';
+}
+async function renderMenu() {
+  document.getElementById('dashGreet').textContent=`${saludoHora()}, ${S.user||''}`;
   document.getElementById('dbdg').textContent=S.dose+' Gy';
-  document.getElementById('mdose').textContent=S.dose;
+  document.getElementById('kpiDose').innerHTML=S.dose+' <span class="kpi-unit">Gy</span>';
   document.getElementById('sdose').value=S.dose;
   document.getElementById('mdate').value=tod(new Date());
   const n=S.staged.length;
-  const b=document.getElementById('nbf');
-  b.textContent=n; b.style.display=n>0?'flex':'none';
+  const b=document.getElementById('nbfSb');
+  if(b){ b.textContent=n; b.style.display=n>0?'inline-flex':'none'; }
+  const muserSb=document.getElementById('muserSb'); if(muserSb) muserSb.textContent=S.user||'—';
+  const muserAvSb=document.getElementById('muserAvSb'); if(muserAvSb) muserAvSb.textContent=(S.user||'?').charAt(0).toUpperCase();
+  await actualizarDashboardKPIs();
+}
+async function actualizarDashboardKPIs() {
+  document.getElementById('kpiPend').textContent=LS.pending().length;
+  const hoy=tod(new Date());
+  if(!LS.token()){ renderDashboardLocal(hoy); return; }
+  try{
+    const data=await apiPost('/registros',{action:'listar',token:LS.token(),payload:{desde:hoy,hasta:hoy}});
+    const regs=data.registros||[];
+    document.getElementById('kpiHoy').textContent=regs.length;
+    document.getElementById('kpiCompletas').textContent=regs.filter(r=>r.h_fin_irr).length;
+    renderActividadReciente(regs.slice(0,6).map(r=>({
+      hora:r.created_at?new Date(r.created_at).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}):'',
+      urnas:r.n_urnas, dosis:S.dose, sync:true, conductor:r.conductor_nombre
+    })));
+  }catch(e){ renderDashboardLocal(hoy); }
+}
+function renderDashboardLocal(hoy) {
+  const regsHoy=S.staged.filter(r=>r.fchIrr===hoy);
+  document.getElementById('kpiHoy').textContent=regsHoy.length;
+  document.getElementById('kpiCompletas').textContent=regsHoy.filter(r=>r.hFin).length;
+  const pendAt=new Set(LS.pending().map(p=>p.at));
+  renderActividadReciente([...regsHoy].reverse().slice(0,6).map(r=>({
+    hora:r.at?new Date(r.at).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}):'',
+    urnas:r.nUrnas, dosis:S.dose, sync:!pendAt.has(r.at), conductor:r.resp
+  })));
+}
+function renderActividadReciente(items) {
+  const el=document.getElementById('dashActividad');
+  if(!items.length){ el.innerHTML='<div class="remp">Sin actividad todavía hoy</div>'; return; }
+  el.innerHTML=items.map(it=>`
+    <div class="act-item" onclick="go('hist')">
+      <div class="act-time">${it.hora||'--:--'}</div>
+      <div class="act-body">
+        <div class="act-title">${it.urnas||'—'} urna${it.urnas===1?'':'s'} · ${it.dosis||'—'} Gy${it.conductor?' · '+it.conductor:''}</div>
+      </div>
+      <span class="badge ${it.sync?'badge-success':'badge-warning'}">${it.sync?'✓ Sincronizado':'⚠ Pendiente'}</span>
+    </div>`).join('');
 }
 function calcMenu() {
   const s=document.getElementById('mdate').value;
@@ -452,22 +509,47 @@ function stab(name,btn) {
   document.querySelectorAll('.tp').forEach(p=>p.classList.remove('on'));
   btn.classList.add('on');
   document.getElementById('tp-'+name).classList.add('on');
+  updateStepperStatus();
+}
+function updateStepperStatus() {
+  const done={
+    urnas:   !!document.getElementById('fchIrr').value,
+    transp:  !!document.getElementById('fResp').value,
+    temp:    !!(document.getElementById('fTi').value && document.getElementById('fTf').value),
+    irradia: !!document.getElementById('fIrr').value,
+    obs:     false
+  };
+  const numMap={urnas:1,transp:2,temp:3,irradia:4,obs:5};
+  document.querySelectorAll('.step').forEach(btn=>{
+    const step=btn.dataset.step;
+    const circle=btn.querySelector('.step-circle');
+    if(!circle) return;
+    const isActive=btn.classList.contains('on');
+    btn.classList.remove('done');
+    if(done[step] && !isActive){
+      circle.textContent='✓'; btn.classList.add('done');
+    } else {
+      circle.textContent=numMap[step];
+    }
+  });
 }
 
 // ── FORM CALCULATIONS ─────────────────────────────────
 function onFecha() {
   const v=document.getElementById('fchIrr').value;
   const d=pd(v);
-  if(!d){['semana','tasa','fTexp'].forEach(id=>document.getElementById(id).value='');return;}
+  if(!d){['semana','tasa','fTexp'].forEach(id=>document.getElementById(id).value='');updateStepperStatus();return;}
   const r=rate(d);
   document.getElementById('semana').value=isoWk(d);
   document.getElementById('tasa').value=r.toFixed(8);
   document.getElementById('fTexp').value=r>0?(S.dose/r).toFixed(1):'';
+  updateStepperStatus();
 }
 function calcTm() {
   const a=parseFloat(document.getElementById('fTi').value);
   const b=parseFloat(document.getElementById('fTf').value);
   document.getElementById('fTm').value=(!isNaN(a)&&!isNaN(b))?((a+b)/2).toFixed(1):'';
+  updateStepperStatus();
 }
 
 // ── URNAS ─────────────────────────────────────────────
@@ -507,19 +589,19 @@ function renderUrnaPanel(key,color) {
     </div>`;
 }
 
-function openUrna() {
-  _urnaTab='urna1';
+function openUrna(startKey) {
+  _urnaTab=startKey||'urna1';
   UCFG.forEach(({key,color})=>{
     document.getElementById('upanel-'+key).innerHTML=renderUrnaPanel(key,color);
     document.getElementById('upanel-'+key).classList.remove('on');
   });
-  document.getElementById('upanel-urna1').classList.add('on');
+  document.getElementById('upanel-'+_urnaTab).classList.add('on');
   UCFG.forEach(({key})=>{
     const tab=document.getElementById('utab-'+key);
     tab.classList.remove('on','filled');
     if(S[key].n||S[key].date) tab.classList.add('filled');
   });
-  document.getElementById('utab-urna1').classList.add('on');
+  document.getElementById('utab-'+_urnaTab).classList.add('on');
   updNavBtns(); updMpill(); updChips();
   document.getElementById('urnaModal').classList.add('on');
 }
@@ -577,6 +659,23 @@ function uDate(key) {
 function urnaTotal() {
   return (parseInt(S.urna1.n||0)||0)+(parseInt(S.urna2.n||0)||0)+(parseInt(S.urna3.n||0)||0);
 }
+function renderUrnaCards() {
+  const wrap=document.getElementById('urnaCards');
+  if(!wrap) return;
+  wrap.innerHTML=UCFG.map(({key,color,label},i)=>{
+    const u=S[key];
+    const filled=!!(u.n||u.date);
+    return `
+    <button type="button" class="urna-card ${filled?'filled':''}" style="--ucolor:${color}" onclick="openUrna('${key}')">
+      <div class="urna-card-top">
+        <span class="urna-card-num">${String(i+1).padStart(2,'0')}</span>
+        <span class="urna-card-status">${filled?'✓':'—'}</span>
+      </div>
+      <div class="urna-card-qty">${u.n?u.n+' unidades':'Sin datos'}</div>
+      ${u.lote?`<div class="urna-card-lote">Lote ${u.lote}</div>`:''}
+    </button>`;
+  }).join('');
+}
 function updMpill() {
   const t=urnaTotal();
   const p=document.getElementById('mpill');
@@ -585,6 +684,7 @@ function updMpill() {
     const tab=document.getElementById('utab-'+key);
     if(tab){tab.classList.remove('filled');if(S[key].n||S[key].date)tab.classList.add('filled');}
   });
+  renderUrnaCards();
 }
 function updChips() {
   UCFG.forEach(({key,color,label})=>{
@@ -686,6 +786,8 @@ function limpiarForm() {
   S.urna1={n:'',date:'',lote:''}; S.urna2={n:'',date:'',lote:''}; S.urna3={n:'',date:'',lote:''};
   document.getElementById('totBan').style.display='none';
   const b=document.getElementById('dosWrap').querySelector('.aut'); if(b) b.remove();
+  renderUrnaCards();
+  stab('urnas', document.querySelector('.step[data-step="urnas"]'));
 }
 function updStagedUI() {
   const n=S.staged.length;
@@ -1253,16 +1355,18 @@ function clearMD(){S.md=[0,0,0,0,0,0];LS.setMD(S.md);renderMD();toast('Entradas 
 function renderSettings() {
   applyTheme(LS.themePref());
   document.getElementById('sdose').value=S.dose;
-  document.getElementById('admSec').style.display=S.isAdmin?'flex':'none';
-  if(S.isAdmin) renderUsrs();
   actualizarEstadoNotifUI();
+}
+function renderUsersScreen() {
+  if(!S.isAdmin){ go('menu'); toast('Solo un administrador puede ver esta pantalla'); return; }
+  renderUsrs();
 }
 function saveDose() {
   const v=parseFloat(document.getElementById('sdose').value);
   if(isNaN(v)||v<=0){toast('Dosis inválida');return;}
   S.dose=v; LS.setD(v);
   document.getElementById('dbdg').textContent=v+' Gy';
-  document.getElementById('mdose').textContent=v;
+  const kd=document.getElementById('kpiDose'); if(kd) kd.innerHTML=v+' <span class="kpi-unit">Gy</span>';
   if(document.getElementById('fchIrr').value) onFecha();
   toast('✓ Dosis actualizada a '+v+' Gy');
 }

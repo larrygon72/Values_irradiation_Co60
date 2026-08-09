@@ -26,6 +26,83 @@
 <body>
 <div id="app">
 
+<!-- ══════════ SIDEBAR (escritorio) ══════════ -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <img src="img/mosquito_icon.png" alt="">
+    <div>
+      <div class="sidebar-brand-name">Values Irradiation</div>
+      <div class="sidebar-brand-sub">WEB-210</div>
+    </div>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="sidebar-group">
+      <div class="sidebar-group-lbl">Principal</div>
+      <button class="sidebar-link" data-nav="menu" onclick="go('menu')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+        <span>Dashboard</span>
+      </button>
+    </div>
+    <div class="sidebar-group">
+      <div class="sidebar-group-lbl">Operación</div>
+      <button class="sidebar-link sidebar-link-primary" data-nav="form" onclick="go('form')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        <span>Nuevo registro</span>
+      </button>
+      <button class="sidebar-link" data-nav="records" onclick="go('records')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        <span>Registros</span><span class="nbdg sidebar-bdg" id="nbfSb" style="display:none">0</span>
+      </button>
+      <button class="sidebar-link" data-nav="hist" onclick="go('hist')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+        <span>Historial</span>
+      </button>
+      <button class="sidebar-link" data-nav="multidosis" onclick="go('multidosis')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        <span>Multi-Dosis</span>
+      </button>
+    </div>
+    <div class="sidebar-group">
+      <div class="sidebar-group-lbl">Análisis</div>
+      <button class="sidebar-link" data-nav="today" onclick="go('today')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>
+        <span>Dosis hoy</span>
+      </button>
+      <button class="sidebar-link" data-nav="month" onclick="go('month')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></svg>
+        <span>Dosis mensual</span>
+      </button>
+      <button class="sidebar-link" data-nav="weekly" onclick="go('weekly')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20V10M10 20V4M17 20v-7"/></svg>
+        <span>Resumen anual</span>
+      </button>
+    </div>
+    <div class="sidebar-group" id="sidebarAdmin" style="display:none">
+      <div class="sidebar-group-lbl">Administración</div>
+      <button class="sidebar-link" data-nav="users" onclick="go('users')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+        <span>Usuarios</span>
+      </button>
+      <button class="sidebar-link" data-nav="settings" onclick="go('settings')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09A1.65 1.65 0 0015 4.6a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9c.14.31.22.65.23 1H21a2 2 0 010 4h-.09c-.14.31-.22.65-.23 1z"/></svg>
+        <span>Ajustes</span>
+      </button>
+    </div>
+  </nav>
+  <div class="sidebar-foot">
+    <div class="sidebar-status">
+      <span class="cloudbdg" id="cloudbdgSb" title="Estado de conexión">☁ …</span>
+    </div>
+    <div class="sidebar-user">
+      <div class="sidebar-user-avatar" id="muserAvSb">—</div>
+      <div class="sidebar-user-name" id="muserSb">—</div>
+    </div>
+    <button class="btn bgh bs bw" onclick="confirmLogout()">Cerrar sesión</button>
+  </div>
+</aside>
+
+<div class="app-main" id="appMain">
+
 <!-- TOAST -->
 <!-- ══════════ CONFIRMACIÓN (reemplaza al confirm() nativo del navegador) ══════════ -->
 <div class="rdiag" id="confirmOv">
@@ -194,53 +271,61 @@
 
 <!-- ══════════ MENU ══════════ -->
 <div class="sc" id="smenu">
-  <div class="tb" style="padding-bottom:10px">
+  <div class="tb dash-hd">
     <div>
-      <div style="font-family:var(--fh);font-size:11px;color:var(--txt3);letter-spacing:.08em;text-transform:uppercase">Bienvenido</div>
-      <div style="font-family:var(--fh);font-size:20px;font-weight:700" id="muser">—</div>
+      <div class="dash-greet" id="dashGreet">Hola</div>
+      <div class="dash-sub">Control de irradiación</div>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
       <span class="cloudbdg" id="cloudbdg" title="Estado de conexión con la nube">☁ …</span>
       <div class="dbdg" id="dbdg">70 Gy</div>
     </div>
   </div>
-  <div class="mhero">
-    <div class="menu-logo-strip">
-      <img src="img/mosquito_icon.png" class="mlogo" alt="logo">
-      <img src="img/logo_tie_mosquito.png"       class="mlogo" alt="icon">
-      <img src="img/Logo Tragsa.png"  class="mlogo" alt="team">
+  <div class="sa" style="display:flex;flex-direction:column;gap:20px">
+
+    <button class="btn bp bw dash-cta" onclick="go('form')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M12 5v14M5 12h14"/></svg>
+      Nuevo registro
+    </button>
+
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-lbl">Dosis configurada</div>
+        <div class="kpi-val" id="kpiDose">70 <span class="kpi-unit">Gy</span></div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-lbl">Registros de hoy</div>
+        <div class="kpi-val" id="kpiHoy">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-lbl">Irradiaciones completadas</div>
+        <div class="kpi-val" id="kpiCompletas">—</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-lbl">Pendientes de sincronizar</div>
+        <div class="kpi-val" id="kpiPend">—</div>
+      </div>
     </div>
-    <div class="mtit">Calculadora Co-60</div>
-    <div class="mdose">Dosis activa: <span id="mdose">70</span> Gy</div>
-    <div class="mcalc">
-      <label>Calcular tiempo de irradiación</label>
-      <div class="fl"><input type="date" id="mdate"></div>
-      <button class="btn bg bw" onclick="calcMenu()">⚡ Calcular tiempo</button>
+
+    <div>
+      <div class="dash-sect-hd">Actividad reciente</div>
+      <div id="dashActividad"><div class="remp">Sin actividad todavía</div></div>
     </div>
-    <div class="mgrid">
-      <button class="btn bt" onclick="go('today')">Dosis hoy</button>
-      <button class="btn bt" onclick="go('month')">Dosis mes</button>
-      <button class="btn bt" onclick="go('weekly')">Tabla anual</button>
-      <button class="btn bo" onclick="go('settings')">⚙ Ajustes</button>
-    </div>
-  </div>
-  <div class="mbot">
-    <div class="micons">
-      <button class="nicn" onclick="go('form')" title="Formulario">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
-        <span>Formulario</span>
-        <span class="nbdg" id="nbf" style="display:none">0</span>
-      </button>
-      <button class="nicn" onclick="go('multidosis')" title="Multi-Dosis">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-        <span>Multi-Dosis</span>
-      </button>
-      <button class="nicn" onclick="go('hist')" title="Historial">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
-        <span>Historial</span>
-      </button>
-    </div>
-    <button class="btn br bs" onclick="confirmLogout()">Cerrar sesión</button>
+
+    <details class="dash-tools">
+      <summary>Herramientas rápidas</summary>
+      <div class="menu-logo-strip" style="margin-top:14px">
+        <img src="img/mosquito_icon.png" class="mlogo" alt="logo">
+        <img src="img/logo_tie_mosquito.png" class="mlogo" alt="icon">
+        <img src="img/Logo Tragsa.png" class="mlogo" alt="team">
+      </div>
+      <div class="mcalc" style="margin:14px auto 0">
+        <label>Calcular tiempo de irradiación</label>
+        <div class="fl"><input type="date" id="mdate"></div>
+        <button class="btn bg bw" onclick="calcMenu()">⚡ Calcular tiempo</button>
+      </div>
+    </details>
+
   </div>
 </div>
 
@@ -250,12 +335,21 @@
     <h1>Datos Irradiación</h1>
     <div class="sbdg" id="sbdg">0</div>
   </div>
-  <div class="tabs">
-    <button class="tab on"  onclick="stab('urnas',this)">URNAS</button>
-    <button class="tab"     onclick="stab('transp',this)">TRANSP</button>
-    <button class="tab"     onclick="stab('temp',this)">TEMP</button>
-    <button class="tab"     onclick="stab('irradia',this)">IRRADIA</button>
-    <button class="tab"     onclick="stab('obs',this)">OBS</button>
+  <div class="stepper" id="formStepper">
+    <button class="step tab on" data-step="urnas" onclick="stab('urnas',this)">
+      <span class="step-circle">1</span><span class="step-lbl">Datos</span></button>
+    <div class="step-line"></div>
+    <button class="step tab" data-step="transp" onclick="stab('transp',this)">
+      <span class="step-circle">2</span><span class="step-lbl">Transporte</span></button>
+    <div class="step-line"></div>
+    <button class="step tab" data-step="temp" onclick="stab('temp',this)">
+      <span class="step-circle">3</span><span class="step-lbl">Temperatura</span></button>
+    <div class="step-line"></div>
+    <button class="step tab" data-step="irradia" onclick="stab('irradia',this)">
+      <span class="step-circle">4</span><span class="step-lbl">Irradiación</span></button>
+    <div class="step-line"></div>
+    <button class="step tab" data-step="obs" onclick="stab('obs',this)">
+      <span class="step-circle">5</span><span class="step-lbl">Obs.</span></button>
   </div>
   <div class="sa">
 
@@ -266,20 +360,20 @@
         <input type="date" id="fchIrr" oninput="onFecha()">
       </div>
       <div class="fr2">
-        <div class="fl"><label>Semana ISO (auto)</label>
+        <div class="fl auto-fl"><label>⚙ Semana ISO</label>
           <div class="cfr"><input type="text" id="semana" readonly placeholder="—"><span class="aut">auto</span></div>
         </div>
-        <div class="fl"><label>Tasa Gy/s (auto)</label>
+        <div class="fl auto-fl"><label>⚙ Tasa Gy/s</label>
           <div class="cfr"><input type="text" id="tasa" readonly placeholder="—"><span class="aut">auto</span></div>
           <span class="fhint">Se calcula sola con la dosis y el tiempo de exposición.</span>
         </div>
       </div>
-      <div class="ucenter">
-        <div class="totb" id="totBan" style="display:none">
-          <span class="totb-l">Total urnas</span>
-          <span class="totb-v" id="totVal">0</span>
-        </div>
-        <button class="burna" onclick="openUrna()">🏺 Urnas</button>
+
+      <div class="dash-sect-hd" style="margin-top:4px">Urnas</div>
+      <div class="urna-cards" id="urnaCards"></div>
+      <div class="totb" id="totBan" style="display:none">
+        <span class="totb-l">Total urnas</span>
+        <span class="totb-v" id="totVal">0</span>
       </div>
     </div>
 
@@ -290,7 +384,7 @@
           <select id="fResp" onchange="onConductorChange()">
             <option value="">— Selecciona conductor —</option>
           </select></div>
-        <div class="fl"><label>Código (auto)</label>
+        <div class="fl auto-fl"><label>⚙ Código conductor</label>
           <div class="cfr"><input type="text" id="fRespCod" readonly placeholder="—"><span class="aut">auto</span></div>
           <span class="fhint">1ª letra del nombre + 1ª de cada apellido (ej. Josep Navarro Navarro → JNN).</span></div>
       </div>
@@ -310,7 +404,7 @@
         <input type="number" id="fTi" step="0.1" placeholder="ej. 22.5" oninput="calcTm()"></div>
       <div class="fl"><label>Tª final (°C)</label>
         <input type="number" id="fTf" step="0.1" placeholder="ej. 23.0" oninput="calcTm()"></div>
-      <div class="fl"><label>Tª media (auto)</label>
+      <div class="fl auto-fl"><label>⚙ Tª media</label>
         <div class="cfr"><input type="text" id="fTm" readonly placeholder="—"><span class="aut">auto</span></div>
         <span class="fhint">Media entre la temperatura inicial y la final.</span></div>
     </div>
@@ -318,8 +412,8 @@
     <!-- TAB IRRADIA -->
     <div class="tp" id="tp-irradia">
       <div class="fl"><label>Irradiador</label>
-        <input type="text" id="fIrr" placeholder="Nombre / ID del irradiador"></div>
-      <div class="fl"><label>Tiempo exposición (s) — auto</label>
+        <input type="text" id="fIrr" placeholder="Nombre / ID del irradiador" oninput="updateStepperStatus()"></div>
+      <div class="fl auto-fl"><label>⚙ Tiempo exposición (s)</label>
         <div class="cfr"><input type="text" id="fTexp" readonly placeholder="—"><span class="aut">auto</span></div>
         <span class="fhint">Se calcula con la dosis programada y la tasa del día.</span></div>
       <div class="fl"><label>Dosímetros</label>
@@ -521,8 +615,18 @@
         <button class="btn bt bs" id="notifBtn" style="display:none" onclick="pedirPermisoNotificaciones()">🔔 Activar</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ══════════ USUARIOS (administración) ══════════ -->
+<div class="sc" id="susers">
+  <div class="tb">
+    <button class="back" onclick="go('menu')">← Volver</button>
+    <h1>Usuarios</h1>
+  </div>
+  <div class="sa" style="display:flex;flex-direction:column;gap:16px">
     <div class="ssc" id="admSec">
-      <h3>Gestión de usuarios</h3>
+      <h3>Dar de alta un usuario</h3>
       <div class="fl"><label>Usuario (nick)</label>
         <input type="text" id="nusr" placeholder="Ej. jnavarro"></div>
       <div class="fr2">
@@ -540,6 +644,49 @@
       <div class="lft" id="usrSyncNote" style="margin-top:6px"></div>
     </div>
   </div>
+</div>
+
+</div>
+
+<!-- ══════════ BOTTOM NAV (móvil) ══════════ -->
+<nav class="bottomnav" id="bottomnav">
+  <button data-nav="menu" onclick="go('menu')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+    <span>Inicio</span>
+  </button>
+  <button data-nav="form" onclick="go('form')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+    <span>Nuevo</span>
+  </button>
+  <button data-nav="hist" onclick="go('hist')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+    <span>Historial</span>
+  </button>
+  <button onclick="toggleDrawer()" id="bottomnavMore">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+    <span>Más</span>
+  </button>
+</nav>
+
+<!-- ══════════ DRAWER (móvil, opciones secundarias) ══════════ -->
+<div class="drawer-ov" id="drawerOv" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-hd">
+    <span>Más opciones</span>
+    <button class="drawer-close" onclick="closeDrawer()">✕</button>
+  </div>
+  <div class="drawer-grp-lbl">Operación</div>
+  <button class="drawer-link" data-nav="records" onclick="go('records')">Registros</button>
+  <button class="drawer-link" data-nav="multidosis" onclick="go('multidosis')">Multi-Dosis</button>
+  <div class="drawer-grp-lbl">Análisis</div>
+  <button class="drawer-link" data-nav="today" onclick="go('today')">Dosis hoy</button>
+  <button class="drawer-link" data-nav="month" onclick="go('month')">Dosis mensual</button>
+  <button class="drawer-link" data-nav="weekly" onclick="go('weekly')">Resumen anual</button>
+  <div class="drawer-grp-lbl" id="drawerAdminLbl" style="display:none">Administración</div>
+  <button class="drawer-link" id="drawerUsersLink" data-nav="users" onclick="go('users')" style="display:none">Usuarios</button>
+  <button class="drawer-link" data-nav="settings" onclick="go('settings')">Ajustes</button>
+  <hr class="xdiv">
+  <button class="drawer-link" style="color:var(--red-l)" onclick="confirmLogout()">Cerrar sesión</button>
 </div>
 
 </div><!-- /#app -->

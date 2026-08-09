@@ -323,6 +323,58 @@ historial como tabla profesional con panel de detalle, y estadísticas/
 microinteracciones/accesibilidad) — son cambios estructurales grandes que
 se están abordando por partes para poder probar cada uno a fondo.
 
+## Fase 2 del rediseño profesional — Dashboard + navegación
+
+- **Dashboard nuevo** como pantalla de inicio tras el login: saludo según
+  la hora del día, 4 tarjetas KPI (dosis configurada, registros de hoy,
+  irradiaciones completadas, pendientes de sincronizar — con datos reales
+  de Supabase cuando hay conexión, o del dispositivo si no la hay) y
+  actividad reciente con badges de estado, clicable.
+- **Sidebar en escritorio** (≥900px): logo, navegación agrupada
+  (Principal / Operación / Análisis / Administración — este último solo
+  visible para administradores), usuario actual, estado de conexión y
+  cerrar sesión.
+- **Barra inferior + menú "Más" en móvil**: Inicio, Nuevo registro,
+  Historial siempre visibles; el resto de secciones en un panel lateral
+  deslizante.
+- **Usuarios** ahora es su propia pantalla (antes vivía dentro de
+  Ajustes), protegida: si alguien sin rol de administrador intenta entrar
+  por URL o navegación, se le redirige al Dashboard.
+- El antiguo menú (con la calculadora de tiempo de irradiación) no se ha
+  perdido — vive ahora dentro de "Herramientas rápidas", plegado, en el
+  propio Dashboard.
+
+> Nota sobre las capturas: se han generado renderizando el CSS/HTML real
+> de la app con un motor de renderizado antiguo (no soporta CSS Grid), así
+> que en esas imágenes concretas las tarjetas KPI se ven apiladas en una
+> columna en vez de en cuadrícula — en cualquier navegador actual
+> (Chrome, Safari, Firefox, Edge) se ven correctamente en cuadrícula.
+
+**Quedan pendientes** las fases 3 a 5 (formulario con stepper y urnas
+como tarjetas, historial como tabla con panel de detalle, estadísticas/
+gráficos/microinteracciones/accesibilidad).
+
+## Fase 3 del rediseño profesional — Formulario con stepper + Urnas como tarjetas
+
+- **Stepper numerado** en el formulario: ① Datos → ② Transporte →
+  ③ Temperatura → ④ Irradiación → ⑤ Observaciones. Cada paso muestra si
+  está pendiente (número), activo (resaltado) o completado (✓ verde),
+  calculado en tiempo real según lo que ya has rellenado — nunca se
+  pierde nada al cambiar de sección.
+- **Urnas como tarjetas**, visibles directamente en el primer paso (antes
+  había que pulsar un botón para verlas): cada tarjeta muestra el número
+  de urna, si tiene datos (✓) o no (—), las unidades y el lote. Al tocar
+  una tarjeta se abre el mismo editor de siempre, directamente en esa
+  urna. El total de unidades sigue mostrándose igual que antes.
+- **Campos automáticos más reconocibles**: además de la etiqueta "auto"
+  ya existente, ahora llevan un icono ⚙ y un borde de color a la
+  izquierda para distinguirlos de un vistazo de los campos que hay que
+  rellenar a mano.
+
+**Quedan pendientes** las fases 4 y 5 (historial como tabla profesional
+con panel de detalle y acciones editar/duplicar, y estadísticas/gráficos/
+microinteracciones/accesibilidad).
+
 ## Próximos pasos
 
 Con esto ya tienes: nube conectada, despliegue automático, gestión de
