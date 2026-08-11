@@ -33,6 +33,8 @@ const S = {
   md:[0,0,0,0,0,0],
   exCtx:'form',
   histVista:'lista', histRaw:[], histFiltered:[],
+  histSort:{campo:'fecha_irradiacion',dir:'desc'},
+  editingId:null, detRegistro:null,
   lastCheck:null
 };
 let _systemThemeMQ=null;
@@ -293,6 +295,11 @@ function go(id) {
   document.getElementById('drawerUsersLink').style.display=S.isAdmin?'block':'none';
   closeDrawer();
 }
+function nuevoRegistro() {
+  S.editingId=null;
+  go('form');
+  limpiarForm();
+}
 function logout() {
   LS.setToken(''); LS.setSession(null);
   S.user=null; S.isAdmin=false;
@@ -460,16 +467,56 @@ async function actualizarDashboardKPIs() {
   document.getElementById('kpiPend').textContent=LS.pending().length;
   const hoy=tod(new Date());
   if(!LS.token()){ renderDashboardLocal(hoy); return; }
+  const inicioMes=hoy.slice(0,7)+'-01';
   try{
-    const data=await apiPost('/registros',{action:'listar',token:LS.token(),payload:{desde:hoy,hasta:hoy}});
+    const data=await apiPost('/registros',{action:'listar',token:LS.token(),payload:{desde:inicioMes,hasta:hoy}});
     const regs=data.registros||[];
-    document.getElementById('kpiHoy').textContent=regs.length;
-    document.getElementById('kpiCompletas').textContent=regs.filter(r=>r.h_fin_irr).length;
+    const regsHoy=regs.filter(r=>r.fecha_irradiacion===hoy);
+    document.getElementById('kpiHoy').textContent=regsHoy.length;
+    document.getElementById('kpiCompletas').textContent=regsHoy.filter(r=>r.h_fin_irr).length;
     renderActividadReciente(regs.slice(0,6).map(r=>({
       hora:r.created_at?new Date(r.created_at).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}):'',
-      urnas:r.n_urnas, dosis:S.dose, sync:true, conductor:r.conductor_nombre
+      urnas:r.n_urnas, dosis:dosisRegistro(r)||S.dose, sync:true, conductor:r.conductor_nombre
     })));
+    renderResumenDosis(regs, hoy);
   }catch(e){ renderDashboardLocal(hoy); }
+}
+function renderResumenDosis(regs, hoy) {
+  const hoyD=pd(hoy);
+  const diaSemana=hoyD.getDay(); // 0=domingo
+  const inicioSemana=new Date(hoyD); inicioSemana.setDate(hoyD.getDate()-(diaSemana===0?6:diaSemana-1));
+  const isoInicioSemana=tod(inicioSemana);
+  let dHoy=0, dSemana=0, dMes=0;
+  regs.forEach(r=>{
+    const d=dosisRegistro(r)||0;
+    dMes+=d;
+    if(r.fecha_irradiacion>=isoInicioSemana) dSemana+=d;
+    if(r.fecha_irradiacion===hoy) dHoy+=d;
+  });
+  document.getElementById('resHoy').textContent=dHoy;
+  document.getElementById('resSemana').textContent=dSemana;
+  document.getElementById('resMes').textContent=dMes;
+  dibujarTendenciaDashboard(regs);
+}
+let dashChartInstance=null;
+function dibujarTendenciaDashboard(regs) {
+  const wrap=document.getElementById('dashChartWrap');
+  const canvas=document.getElementById('dashChart');
+  if(!wrap||!canvas||!window.Chart||!regs.length){ if(wrap) wrap.style.display='none'; return; }
+  wrap.style.display='block';
+  if(dashChartInstance){ dashChartInstance.destroy(); dashChartInstance=null; }
+  const porDia={};
+  regs.forEach(r=>{ if(!r.fecha_irradiacion) return; porDia[r.fecha_irradiacion]=(porDia[r.fecha_irradiacion]||0)+(dosisRegistro(r)||0); });
+  const dias=Object.keys(porDia).sort();
+  const cPrimary=temaColor('--blue-l'), cGrid=temaColor('--brd'), cTick=temaColor('--txt3');
+  dashChartInstance=new Chart(canvas.getContext('2d'),{
+    type:'bar',
+    data:{labels:dias.map(d=>fmt(pd(d))), datasets:[{label:'Dosis (Gy)',data:dias.map(d=>porDia[d]),backgroundColor:cPrimary,borderRadius:4}]},
+    options:{responsive:true,animation:{duration:250},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:(ctx)=>`${ctx.formattedValue} Gy`}}},
+      scales:{x:{ticks:{color:cTick,maxRotation:60},grid:{display:false}},
+              y:{ticks:{color:cTick},grid:{color:cGrid},title:{display:true,text:'Gy',color:cTick}}}}
+  });
 }
 function renderDashboardLocal(hoy) {
   const regsHoy=S.staged.filter(r=>r.fchIrr===hoy);
@@ -770,7 +817,27 @@ async function guardar() {
     // Metadatos
     at: new Date().toISOString(),
   };
-  setBtnLoading('gbtn', true, 'Guardando…');
+  setBtnLoading('gbtn', true, S.editingId?'Actualizando…':'Guardando…');
+
+  if(S.editingId){
+    try{
+      await apiPost('/registros',{action:'actualizar',token:LS.token(),payload:{id:S.editingId,registro:rec}});
+      setCloudState('ok');
+      toast('✓ Registro actualizado');
+    }catch(e){
+      setCloudState(e.isNetwork?'off':'err');
+      toast('⚠ No se pudo actualizar: '+e.message);
+      setBtnLoading('gbtn', false);
+      return;
+    }
+    S.editingId=null;
+    limpiarForm();
+    setBtnLoading('gbtn', false);
+    document.getElementById('gbtn').innerHTML='Guardar <span id="gcnt"></span>';
+    updStagedUI();
+    return;
+  }
+
   S.staged.push(rec); LS.setS(S.staged);
   await syncRecordToCloud(rec);
   limpiarForm();
@@ -1079,41 +1146,103 @@ function filtroHistorialRapido() {
 function poblarFiltrosHistorial(regs) {
   const condSel=document.getElementById('hConductor');
   const usrSel=document.getElementById('hUsuario');
-  const condActual=condSel.value, usrActual=usrSel.value;
+  const irrSel=document.getElementById('hIrradiador');
+  const condActual=condSel.value, usrActual=usrSel.value, irrActual=irrSel.value;
   const conductores=[...new Map(regs.filter(r=>r.conductor_nick).map(r=>[r.conductor_nick,r.conductor_nombre||r.conductor_nick])).entries()];
   const usuarios=[...new Set(regs.map(r=>r.creado_por).filter(Boolean))].sort();
+  const irradiadores=[...new Set(regs.map(r=>r.irradiador).filter(Boolean))].sort();
   condSel.innerHTML='<option value="">Todos</option>'+conductores.map(([nick,nom])=>`<option value="${nick}">${nom}</option>`).join('');
   usrSel.innerHTML='<option value="">Todos</option>'+usuarios.map(u=>`<option value="${u}">${u}</option>`).join('');
+  irrSel.innerHTML='<option value="">Todos</option>'+irradiadores.map(i=>`<option value="${i}">${i}</option>`).join('');
   if(conductores.some(([nick])=>nick===condActual)) condSel.value=condActual;
   if(usuarios.includes(usrActual)) usrSel.value=usrActual;
+  if(irradiadores.includes(irrActual)) irrSel.value=irrActual;
 }
+function dosisRegistro(r) {
+  const d=(r.tasa&&r.tiempo_exposicion)?Math.round(parseFloat(r.tasa)*parseFloat(r.tiempo_exposicion)):null;
+  return d;
+}
+function estadoRegistro(r) { return r.h_fin_irr ? 'completa' : 'incompleta'; }
 function aplicarFiltrosHistorial() {
   const cond=document.getElementById('hConductor').value;
   const usr=document.getElementById('hUsuario').value;
+  const irr=document.getElementById('hIrradiador').value;
+  const est=document.getElementById('hEstado').value;
   const sem=document.getElementById('hSemana').value.trim();
   const txt=document.getElementById('hTexto').value.trim().toLowerCase();
   let regs=S.histRaw||[];
   if(cond) regs=regs.filter(r=>r.conductor_nick===cond);
   if(usr)  regs=regs.filter(r=>r.creado_por===usr);
+  if(irr)  regs=regs.filter(r=>r.irradiador===irr);
+  if(est)  regs=regs.filter(r=>estadoRegistro(r)===est);
   if(sem)  regs=regs.filter(r=>String(r.semana_iso||'')===sem);
   if(txt)  regs=regs.filter(r=>
     (r.irradiador||'').toLowerCase().includes(txt) ||
     (r.observaciones||'').toLowerCase().includes(txt) ||
     (r.conductor_nombre||'').toLowerCase().includes(txt) ||
     (r.creado_por||'').toLowerCase().includes(txt));
+  regs=ordenarRegistros(regs);
   S.histFiltered=regs;
   renderHistorial(regs);
   if(S.histVista==='graf') dibujarGraficaHistorial();
   const note=document.getElementById('histNote');
   if(note) note.textContent=`${regs.length} registro(s) encontrado(s)`;
 }
+function ordenarHistorial(campo) {
+  if(S.histSort.campo===campo) S.histSort.dir=(S.histSort.dir==='asc')?'desc':'asc';
+  else { S.histSort.campo=campo; S.histSort.dir=(campo==='fecha_irradiacion')?'desc':'asc'; }
+  S.histFiltered=ordenarRegistros(S.histFiltered);
+  renderHistorial(S.histFiltered);
+}
+function ordenarRegistros(regs) {
+  const {campo,dir}=S.histSort;
+  const mul=dir==='asc'?1:-1;
+  const val=(r)=>{
+    if(campo==='dosis') return dosisRegistro(r)||0;
+    if(campo==='estado') return estadoRegistro(r);
+    return r[campo];
+  };
+  return [...regs].sort((a,b)=>{
+    let va=val(a), vb=val(b);
+    if(va==null&&vb==null) return 0;
+    if(va==null) return 1; if(vb==null) return -1;
+    if(typeof va==='string') return va.localeCompare(vb)*mul;
+    return (va-vb)*mul;
+  });
+}
 function renderHistorial(regs) {
+  document.querySelectorAll('.hist-table th[data-sort]').forEach(th=>{
+    const ico=th.querySelector('.sort-ico');
+    if(th.dataset.sort===S.histSort.campo){
+      th.classList.add('sorted'); ico.textContent=S.histSort.dir==='asc'?'▲':'▼';
+    } else { th.classList.remove('sorted'); ico.textContent=''; }
+  });
+
+  const tbody=document.getElementById('histTableBody');
   const box=document.getElementById('histList');
-  if(!regs.length){box.innerHTML='<div class="remp">No hay registros con estos filtros</div>';return;}
+  if(!regs.length){
+    tbody.innerHTML='<tr><td colspan="5" class="remp">No hay registros con estos filtros</td></tr>';
+    box.innerHTML='<div class="remp">No hay registros con estos filtros</div>';
+    return;
+  }
+
+  tbody.innerHTML=regs.map(r=>{
+    const fIrr=r.fecha_irradiacion?fmt(pd(r.fecha_irradiacion)):'Sin fecha';
+    const dosis=dosisRegistro(r);
+    const completa=estadoRegistro(r)==='completa';
+    return `<tr onclick="abrirDetalleRegistro('${r.id}')">
+      <td>${fIrr}</td>
+      <td>${r.conductor_nombre||'<span class="td-muted">—</span>'}</td>
+      <td>${r.n_urnas||'—'}</td>
+      <td>${dosis?dosis+' Gy':'<span class="td-muted">—</span>'}</td>
+      <td><span class="badge ${completa?'badge-success':'badge-caution'}">${completa?'✓ Completada':'! Incompleta'}</span></td>
+    </tr>`;
+  }).join('');
+
   box.innerHTML=regs.map(r=>{
     const fIrr=r.fecha_irradiacion?fmt(pd(r.fecha_irradiacion)):'Sin fecha';
-    const puedeBorrar=S.isAdmin||r.creado_por===S.user;
-    return `<div class="ritem">
+    const completa=estadoRegistro(r)==='completa';
+    return `<div class="ritem" style="cursor:pointer" onclick="abrirDetalleRegistro('${r.id}')">
       <div class="rdate">📋 ${fIrr} — Sem. ${r.semana_iso||'?'} <span style="color:var(--txt3);font-weight:400">· guardado por ${r.creado_por||'—'}</span></div>
       <div class="rdets">
         <span>Urnas: <strong>${r.n_urnas||'—'}</strong></span>
@@ -1124,7 +1253,7 @@ function renderHistorial(regs) {
         <span>Tª media: <strong>${r.temp_media||'—'} °C</strong></span>
       </div>
       ${r.observaciones?`<div class="robs">📝 ${r.observaciones.substring(0,100)}${r.observaciones.length>100?'…':''}</div>`:''}
-      ${puedeBorrar?`<div style="margin-top:8px;text-align:right"><button class="btn br bs" style="padding:3px 10px;font-size:11px" onclick="eliminarHistorialRegistro('${r.id}')">🗑 Eliminar</button></div>`:''}
+      <div style="margin-top:8px"><span class="badge ${completa?'badge-success':'badge-caution'}">${completa?'✓ Completada':'! Incompleta'}</span></div>
       </div>`;
   }).join('<div style="height:8px"></div>');
 }
@@ -1142,6 +1271,121 @@ async function eliminarHistorialRegistro(id) {
   }
 }
 
+// ── DETALLE DE REGISTRO ────────────────────────────────
+function abrirDetalleRegistro(id) {
+  const r=(S.histRaw||[]).find(x=>x.id===id);
+  if(!r) return;
+  S.detRegistro=r;
+  const fIrr=r.fecha_irradiacion?fmt(pd(r.fecha_irradiacion)):'Sin fecha';
+  const completa=estadoRegistro(r)==='completa';
+  const dosis=dosisRegistro(r);
+  document.getElementById('detSub').textContent=`${fIrr} · guardado por ${r.creado_por||'—'} el ${r.created_at?new Date(r.created_at).toLocaleString('es-ES'):'—'}`;
+
+  const item=(lbl,val)=>`<div><div class="det-item-lbl">${lbl}</div><div class="det-item-val">${val!=null&&val!==''?val:'—'}</div></div>`;
+
+  document.getElementById('detBody').innerHTML=`
+    <div class="det-sect">
+      <div class="det-sect-hd">Identificación</div>
+      <div class="det-grid">
+        ${item('Fecha irradiación',fIrr)}
+        ${item('Semana ISO',r.semana_iso)}
+        ${item('Estado','')}
+      </div>
+      <div style="margin-top:8px"><span class="badge ${completa?'badge-success':'badge-caution'}">${completa?'✓ Completada':'! Incompleta'}</span>
+      <span class="badge badge-info" style="margin-left:6px">☁ Sincronizado</span></div>
+    </div>
+    <div class="det-sect">
+      <div class="det-sect-hd">Datos de irradiación</div>
+      <div class="det-grid">
+        ${item('Tasa (Gy/s)', r.tasa?parseFloat(r.tasa).toFixed(8):null)}
+        ${item('Tiempo exposición (s)', r.tiempo_exposicion)}
+        ${item('Dosis aplicada', dosis?dosis+' Gy':null)}
+        ${item('Nº urnas', r.n_urnas)}
+        ${item('Dosímetros', r.dosimetros)}
+        ${item('Irradiador', r.irradiador)}
+      </div>
+    </div>
+    <div class="det-sect">
+      <div class="det-sect-hd">Transporte</div>
+      <div class="det-grid">
+        ${item('Conductor', r.conductor_nombre)}
+        ${item('Código', r.conductor_codigo)}
+        ${item('H. ida', (r.h_ida_inicio||'—')+' → '+(r.h_ida_llegada||'—'))}
+        ${item('H. vuelta', (r.h_vuelta_inicio||'—')+' → '+(r.h_vuelta_llegada||'—'))}
+      </div>
+    </div>
+    <div class="det-sect">
+      <div class="det-sect-hd">Temperatura</div>
+      <div class="det-grid">
+        ${item('Inicial (°C)', r.temp_inicial)}
+        ${item('Final (°C)', r.temp_final)}
+        ${item('Media (°C)', r.temp_media)}
+        ${item('H. inicio irr.', r.h_inicio_irr)}
+        ${item('H. fin irr.', r.h_fin_irr)}
+      </div>
+    </div>
+    ${r.observaciones?`<div class="det-sect"><div class="det-sect-hd">Observaciones</div><div class="det-obs">${r.observaciones}</div></div>`:''}
+  `;
+  document.getElementById('detOv').classList.add('on');
+}
+function cerrarDetalleRegistro() {
+  document.getElementById('detOv').classList.remove('on');
+}
+function cargarRegistroEnFormulario(r) {
+  document.getElementById('fchIrr').value=r.fecha_irradiacion||'';
+  onFecha();
+  document.getElementById('fResp').value=r.conductor_nick||'';
+  onConductorChange();
+  document.getElementById('fHII').value=r.h_ida_inicio||'';
+  document.getElementById('fHIL').value=r.h_ida_llegada||'';
+  document.getElementById('fHVI').value=r.h_vuelta_inicio||'';
+  document.getElementById('fHVL').value=r.h_vuelta_llegada||'';
+  document.getElementById('fTi').value=r.temp_inicial??'';
+  document.getElementById('fTf').value=r.temp_final??'';
+  calcTm();
+  document.getElementById('fIrr').value=r.irradiador||'';
+  document.getElementById('fDos').value=r.dosimetros??'';
+  document.getElementById('fHini').value=r.h_inicio_irr||'';
+  document.getElementById('fHfin').value=r.h_fin_irr||'';
+  document.getElementById('fObs').value=r.observaciones||'';
+  S.urna1=r.urna1&&typeof r.urna1==='object'?{...r.urna1}:{n:'',date:'',lote:''};
+  S.urna2=r.urna2&&typeof r.urna2==='object'?{...r.urna2}:{n:'',date:'',lote:''};
+  S.urna3=r.urna3&&typeof r.urna3==='object'?{...r.urna3}:{n:'',date:'',lote:''};
+  renderUrnaCards(); updMpill();
+  go('form');
+  stab('urnas', document.querySelector('.step[data-step="urnas"]'));
+}
+function editarRegistroDesdeDetalle() {
+  const r=S.detRegistro; if(!r) return;
+  if(!S.isAdmin && r.creado_por!==S.user){ toast('Solo puedes editar tus propios registros'); return; }
+  S.editingId=r.id;
+  cargarRegistroEnFormulario(r);
+  const gbtn=document.getElementById('gbtn'); if(gbtn) gbtn.innerHTML='💾 Actualizar registro';
+  cerrarDetalleRegistro();
+  toast('Editando registro — los cambios sustituirán al original al guardar');
+}
+function duplicarRegistroDesdeDetalle() {
+  const r=S.detRegistro; if(!r) return;
+  S.editingId=null;
+  cargarRegistroEnFormulario(r);
+  cerrarDetalleRegistro();
+  toast('Registro duplicado en el formulario — revisa los datos antes de guardar');
+}
+async function exportarRegistroDesdeDetalle() {
+  const r=S.detRegistro; if(!r) return;
+  const {header,rows}=buildHistRows([r]);
+  const content=[header,...rows].map(row=>row.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  const filename=`registro_${r.id.slice(0,8)}.csv`;
+  const result=await dlFile(filename,content,'text/csv;charset=utf-8;');
+  if(result===null) return;
+  showSaveDlg(filename,'csv',new Blob(['\uFEFF'+content]).size,'hist',result);
+}
+async function eliminarRegistroDesdeDetalle() {
+  const r=S.detRegistro; if(!r) return;
+  cerrarDetalleRegistro();
+  await eliminarHistorialRegistro(r.id);
+}
+
 // ── GRÁFICAS DEL HISTORIAL ─────────────────────────────
 let histChartInstance=null;
 function cambiarVistaHistorial(vista) {
@@ -1156,6 +1400,9 @@ function cambiarVistaHistorial(vista) {
     dibujarGraficaHistorial();
   }
 }
+function temaColor(varName) {
+  return getComputedStyle(document.body).getPropertyValue(varName).trim() || '#4C6EF5';
+}
 function dibujarGraficaHistorial() {
   const canvas=document.getElementById('histChart');
   if(!canvas||!window.Chart) return;
@@ -1165,47 +1412,55 @@ function dibujarGraficaHistorial() {
     .sort((a,b)=>a.fecha_irradiacion.localeCompare(b.fecha_irradiacion));
   if(!regs.length) return;
 
+  // Paleta del tema activo: Royal/Sky/Turquesa en claro, Navy/Lavanda/Berenjena en oscuro
+  const cPrimary=temaColor('--blue-l'), cSecondary=temaColor('--sky')||temaColor('--purple-l'),
+        cTertiary=temaColor('--teal-l'), cGrid=temaColor('--brd'), cTick=temaColor('--txt3');
+
   const tipo=document.getElementById('hChartTipo').value;
-  const gridCol='rgba(255,255,255,.08)', tickCol='#8890A6';
-  let type='line', labels, datasets, yTitle='';
+  let type='line', labels, datasets, yTitle='', unidad='';
 
   if(tipo==='temp'){
     labels=regs.map(r=>fmt(pd(r.fecha_irradiacion)));
     datasets=[
-      {label:'Tª inicial',data:regs.map(r=>r.temp_inicial),borderColor:'#748FFC',backgroundColor:'#748FFC',tension:.3,spanGaps:true},
-      {label:'Tª final',data:regs.map(r=>r.temp_final),borderColor:'#FF6B6B',backgroundColor:'#FF6B6B',tension:.3,spanGaps:true},
-      {label:'Tª media',data:regs.map(r=>r.temp_media),borderColor:'#69DB7C',backgroundColor:'#69DB7C',tension:.3,spanGaps:true},
+      {label:'Tª inicial',data:regs.map(r=>r.temp_inicial),borderColor:cPrimary,backgroundColor:cPrimary,tension:.3,spanGaps:true},
+      {label:'Tª final',data:regs.map(r=>r.temp_final),borderColor:cSecondary,backgroundColor:cSecondary,tension:.3,spanGaps:true},
+      {label:'Tª media',data:regs.map(r=>r.temp_media),borderColor:cTertiary,backgroundColor:cTertiary,tension:.3,spanGaps:true},
     ];
-    yTitle='°C';
+    yTitle='°C'; unidad=' °C';
   } else if(tipo==='tasa'){
     labels=regs.map(r=>fmt(pd(r.fecha_irradiacion)));
-    datasets=[{label:'Tasa',data:regs.map(r=>r.tasa),borderColor:'#FFA94D',backgroundColor:'#FFA94D',tension:.3,spanGaps:true}];
-    yTitle='Gy/s';
+    datasets=[{label:'Tasa',data:regs.map(r=>r.tasa),borderColor:cPrimary,backgroundColor:cPrimary,tension:.3,spanGaps:true}];
+    yTitle='Gy/s'; unidad=' Gy/s';
   } else if(tipo==='texp'){
     labels=regs.map(r=>fmt(pd(r.fecha_irradiacion)));
-    datasets=[{label:'Tiempo exposición',data:regs.map(r=>r.tiempo_exposicion),borderColor:'#748FFC',backgroundColor:'#748FFC',tension:.3,spanGaps:true}];
-    yTitle='s';
+    datasets=[{label:'Tiempo exposición',data:regs.map(r=>r.tiempo_exposicion),borderColor:cPrimary,backgroundColor:cPrimary,tension:.3,spanGaps:true}];
+    yTitle='s'; unidad=' s';
   } else if(tipo==='urnas'){
     labels=regs.map(r=>fmt(pd(r.fecha_irradiacion)));
-    datasets=[{label:'Nº urnas',data:regs.map(r=>r.n_urnas),borderColor:'#69DB7C',backgroundColor:'#69DB7C',tension:.3,spanGaps:true}];
-    yTitle='urnas';
+    datasets=[{label:'Nº urnas',data:regs.map(r=>r.n_urnas),borderColor:cTertiary,backgroundColor:cTertiary,tension:.3,spanGaps:true}];
+    yTitle='urnas'; unidad=' urnas';
   } else if(tipo==='semana'){
     type='bar';
     const porSemana={};
     regs.forEach(r=>{const k=r.semana_iso||'?'; porSemana[k]=(porSemana[k]||0)+1;});
-    labels=Object.keys(porSemana).sort((a,b)=>(+a)-(+b));
-    datasets=[{label:'Registros',data:labels.map(k=>porSemana[k]),backgroundColor:'#4C6EF5'}];
-    yTitle='registros';
+    labels=Object.keys(porSemana).sort((a,b)=>(+a)-(+b)).map(k=>'Sem. '+k);
+    datasets=[{label:'Registros',data:Object.keys(porSemana).sort((a,b)=>(+a)-(+b)).map(k=>porSemana[k]),
+      backgroundColor:cPrimary,borderRadius:4}];
+    yTitle='registros'; unidad=' registros';
   }
 
   histChartInstance=new Chart(canvas.getContext('2d'),{
     type, data:{labels,datasets},
     options:{
       responsive:true,
-      plugins:{legend:{labels:{color:tickCol}}},
+      animation:{duration:250},
+      plugins:{
+        legend:{labels:{color:cTick,usePointStyle:true,boxWidth:8,font:{family:"Inter"}}},
+        tooltip:{callbacks:{label:(ctx)=>`${ctx.dataset.label}: ${ctx.formattedValue}${unidad}`}}
+      },
       scales:{
-        x:{ticks:{color:tickCol,maxRotation:60,minRotation:0},grid:{color:gridCol}},
-        y:{ticks:{color:tickCol},grid:{color:gridCol},title:{display:true,text:yTitle,color:tickCol}}
+        x:{ticks:{color:cTick,maxRotation:60,minRotation:0},grid:{display:false}},
+        y:{ticks:{color:cTick},grid:{color:cGrid},title:{display:true,text:yTitle,color:cTick}}
       }
     }
   });
@@ -1607,6 +1862,9 @@ function applyTheme(pref){
   if(bL) bL.setAttribute('aria-pressed', pref==='light'?'true':'false');
   if(bD) bD.setAttribute('aria-pressed', pref==='dark'?'true':'false');
   if(bS) bS.setAttribute('aria-pressed', pref==='system'?'true':'false');
+  if(S.histVista==='graf' && document.getElementById('shist')?.classList.contains('on')){
+    setTimeout(()=>dibujarGraficaHistorial(), 50);
+  }
 
   // Si el modo es "Sistema", escuchamos cambios en vivo (p.ej. el móvil pasa
   // a modo oscuro por la noche) y actualizamos la app sin recargar.

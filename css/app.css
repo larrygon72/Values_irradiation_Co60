@@ -419,6 +419,15 @@ body.theme-light .fl input[type=time]::-webkit-calendar-picker-indicator{filter:
   padding:16px;background:var(--surf);border:1px solid var(--brd2);border-radius:var(--r);margin:14px auto 0}
 .mcalc label{font-size:11px;font-weight:600;color:var(--txt3);letter-spacing:.03em;text-transform:uppercase}
 
+/* ── RESUMEN DE DOSIS (Dashboard) ── */
+.resumen-dosis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+.resumen-card{background:var(--surf);border:1px solid var(--brd2);border-radius:var(--r);
+  padding:12px;text-align:center}
+.resumen-lbl{font-size:11px;color:var(--txt3);font-weight:600;margin-bottom:4px}
+.resumen-val{font-family:var(--fmono);font-size:20px;font-weight:700;color:var(--blue-l)}
+.resumen-unit{font-size:10px;color:var(--txt3)}
+.chart-card{background:var(--surf);border:1px solid var(--brd2);border-radius:var(--r);padding:14px}
+
 /* ── KPI CARDS ── */
 .kpi-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 @media(min-width:520px){.kpi-grid{grid-template-columns:repeat(4,1fr)}}
@@ -524,6 +533,51 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.25);box-shadow:0
 
 /* ── RECORDS ── */
 .remp{text-align:center;padding:40px 20px;color:var(--txt3);font-size:14px}
+
+/* ── SEARCH BAR (historial) ── */
+.search-bar{display:flex;align-items:center;gap:10px;background:var(--fldbg);
+  border:1px solid var(--brd3);border-radius:var(--rsm);padding:10px 13px}
+.search-bar svg{width:18px;height:18px;color:var(--txt3);flex-shrink:0}
+.search-bar input{border:none;background:none;outline:none;flex:1;font-size:14px;color:var(--txt);padding:0}
+
+/* ── FILTROS PLEGABLES ── */
+.filters-wrap{background:var(--surf2);border:1px solid var(--brd2);border-radius:var(--r);padding:12px 14px}
+.filters-wrap summary{cursor:pointer;font-size:13px;font-weight:700;color:var(--txt2);list-style:none;
+  display:flex;align-items:center;gap:6px}
+.filters-wrap summary::-webkit-details-marker{display:none}
+.filters-wrap summary::before{content:'›';display:inline-block;transition:transform .2s;font-size:15px}
+.filters-wrap[open] summary::before{transform:rotate(90deg)}
+
+/* ── TABLA DE HISTORIAL (escritorio) — en móvil se usan las tarjetas .ritem ── */
+.hist-table-wrap{display:none;overflow-x:auto;border:1px solid var(--brd2);border-radius:var(--r)}
+.hist-table{width:100%;border-collapse:collapse;font-size:13px}
+.hist-table thead{background:var(--surf2)}
+.hist-table th{padding:11px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--txt2);
+  letter-spacing:.03em;text-transform:uppercase;cursor:pointer;user-select:none;white-space:nowrap}
+.hist-table th:hover{color:var(--blue-l)}
+.hist-table th.sorted{color:var(--blue-l)}
+.sort-ico{display:inline-block;width:10px;font-size:10px}
+.hist-table td{padding:11px 14px;border-top:1px solid var(--brd);color:var(--txt);vertical-align:middle}
+.hist-table tbody tr{cursor:pointer;transition:background var(--an)}
+.hist-table tbody tr:hover{background:var(--surf2)}
+.hist-table .td-muted{color:var(--txt3);font-size:12px}
+#histList{display:flex;flex-direction:column;gap:8px}
+@media(min-width:760px){
+  .hist-table-wrap{display:block}
+  #histList{display:none}
+}
+
+/* ── DETALLE DE REGISTRO ── */
+.det-sect{margin-bottom:18px}
+.det-sect:last-child{margin-bottom:0}
+.det-sect-hd{font-size:11px;font-weight:700;color:var(--txt3);letter-spacing:.04em;
+  text-transform:uppercase;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--brd)}
+.det-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px}
+@media(min-width:500px){.det-grid{grid-template-columns:1fr 1fr 1fr}}
+.det-item-lbl{font-size:11px;color:var(--txt3);margin-bottom:2px}
+.det-item-val{font-size:13.5px;color:var(--txt);font-weight:600;font-family:var(--fmono)}
+.det-obs{font-size:13.5px;color:var(--txt2);line-height:1.5;background:var(--surf2);
+  padding:10px 12px;border-radius:var(--rsm)}
 .ritem{background:var(--surf);border:1px solid var(--brd2);border-radius:var(--rsm);
   padding:12px 14px;font-size:13px;color:var(--txt2);display:flex;flex-direction:column;gap:5px}
 .rdate{font-weight:700;color:var(--txt);font-size:14px}
@@ -564,10 +618,36 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.25);box-shadow:0
 ════════════════════════════════════════════════════ */
 body,#app,.sc,.ssc,.tb,.bb,.btn,input,select,textarea,.card,.cardh,
 .totb,.tab,.utab,.rbox,.exbox,.scbox,.fileinfo,.terminal,.dtbl,.dtbl th,.dtbl td,
-.thseg,.thbtn{
+.thseg,.thbtn,.sidebar,.sidebar-link,.bottomnav,.drawer,.kpi-card,.urna-card,
+.act-item,.hist-table,.hist-table th,.hist-table td,.modal,.mhd,.badge,
+.resumen-card,.chart-card,.step-circle,.filters-wrap,.search-bar{
   transition:background-color .25s ease,color .25s ease,
     border-color .25s ease,box-shadow .25s ease;
 }
+
+/* ════════════════════════════════════════════════════
+   MICROINTERACCIONES — apariciones sutiles (150–250ms)
+════════════════════════════════════════════════════ */
+@keyframes fadeInUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.kpi-card,.urna-card,.resumen-card,.act-item,.ritem,.hist-table tbody tr{
+  animation:fadeInUp .22s ease both}
+.kpi-card:nth-child(2),.urna-card:nth-child(2){animation-delay:.03s}
+.kpi-card:nth-child(3),.urna-card:nth-child(3){animation-delay:.06s}
+.kpi-card:nth-child(4){animation-delay:.09s}
+
+/* Los usuarios que prefieren menos movimiento no ven estas animaciones */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;
+    transition-duration:.001ms!important;scroll-behavior:auto!important}
+}
+
+/* ════════════════════════════════════════════════════
+   ACCESIBILIDAD — foco visible por teclado
+════════════════════════════════════════════════════ */
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,
+textarea:focus-visible,[tabindex]:focus-visible{
+  outline:2px solid var(--blue-l);outline-offset:2px;border-radius:4px}
+.btn:focus-visible{outline-offset:3px}
 
 /* ════════════════════════════════════════════════════
    TEMA CLARO — se activa con  body.theme-light

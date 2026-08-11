@@ -375,6 +375,81 @@ gráficos/microinteracciones/accesibilidad).
 con panel de detalle y acciones editar/duplicar, y estadísticas/gráficos/
 microinteracciones/accesibilidad).
 
+## Fase 4 del rediseño profesional — Historial como tabla + panel de detalle
+
+- **Historial ahora es una tabla de verdad** en escritorio (Fecha,
+  Conductor, Urnas, Dosis, Estado — las columnas se pueden ordenar
+  pulsando su cabecera), y sigue siendo tarjetas en móvil, tal como pide
+  el encargo.
+- **Barra de búsqueda** destacada arriba del todo, y los filtros
+  (fechas, conductor, usuario, **irradiador** y **estado** — estos dos
+  últimos son nuevos) ahora están plegados dentro de "Filtros" para no
+  saturar la pantalla.
+- **Estado Completada/Incompleta**: un registro se considera completado
+  si tiene registrada la hora de fin de irradiación. Se ve como badge en
+  la tabla, en las tarjetas y se puede filtrar por él.
+- **Panel de detalle**: al tocar cualquier fila o tarjeta se abre una
+  ficha completa del registro (identificación, datos de irradiación,
+  transporte, temperatura, observaciones, quién y cuándo lo guardó), con
+  4 acciones:
+  - **Editar** — carga el registro en el formulario; al guardar,
+    actualiza ese mismo registro en vez de crear uno nuevo.
+  - **Duplicar** — carga los mismos datos en el formulario para crear un
+    registro nuevo a partir de uno existente.
+  - **Exportar** — descarga ese registro concreto en CSV.
+  - **Eliminar** — igual que antes, con confirmación.
+  - Por permisos: un usuario normal solo puede editar/eliminar sus
+    propios registros; un Admin puede hacerlo con cualquiera.
+- La "Dosis" de la tabla se calcula a partir de la tasa y el tiempo de
+  exposición guardados (no existía como campo propio) — es la dosis real
+  que se programó ese día, no un valor fijo.
+
+**Queda pendiente** la Fase 5, la última: estadísticas/gráficos más
+pulidos, microinteracciones y una pasada de accesibilidad.
+
+## Fase 5 del rediseño profesional — Estadísticas, microinteracciones y accesibilidad
+
+Con esto se completan las 5 fases del encargo de rediseño.
+
+- **Resumen de dosis en el Dashboard**: 3 tarjetas (Hoy / Semana / Mes)
+  con la dosis realmente irradiada, calculada a partir de los registros
+  guardados (no un número fijo) — más una gráfica de barras con la
+  tendencia de los últimos días.
+- **Gráficas con la paleta del tema activo de verdad**: antes tenían
+  colores fijos; ahora leen los colores en el momento de dibujarse, así
+  que en modo claro usan Royal/Sky/Turquesa y en modo oscuro Navy/
+  Lavanda/Berenjena automáticamente — y si cambias de tema estando en la
+  pantalla de gráficas, se redibujan solas con los colores correctos.
+  También se ha quitado la cuadrícula vertical (queda solo la horizontal,
+  más limpia) y los tooltips ahora indican la unidad (Gy, °C, s...).
+- **Microinteracciones**: las tarjetas (KPIs, urnas, resumen, actividad,
+  filas de tabla) aparecen con una animación muy sutil (~200ms) en vez de
+  aparecer de golpe; cambiar de tema ya no "salta" bruscamente entre
+  colores. Quien tenga activado "reducir movimiento" en su dispositivo no
+  ve ninguna de estas animaciones (se respeta esa preferencia).
+- **Accesibilidad**: anillo de foco visible y consistente en todos los
+  botones/campos al navegar con teclado (antes dependía del estilo por
+  defecto del navegador); los botones que solo tenían un icono (✕ cerrar
+  detalle, ✕ cerrar menú) ahora llevan una descripción para lectores de
+  pantalla. El contraste de color ya se validó matemáticamente en la
+  Fase 1, y los estados (Completada/Pendiente/Error...) siempre se
+  comunican con icono + texto, nunca solo con color.
+
+## Resumen del rediseño completo
+
+| Fase | Contenido |
+|---|---|
+| 1 | Paleta exacta, tipografía, menos "HUD", tema de 3 vías |
+| 2 | Dashboard, sidebar/bottom-nav, navegación agrupada, pantalla Usuarios |
+| 3 | Stepper del formulario, urnas como tarjetas |
+| 4 | Historial como tabla + panel de detalle (editar/duplicar/exportar) |
+| 5 | Resumen de dosis, gráficas con tema dinámico, microinteracciones, accesibilidad |
+
+Todo lo anterior mantiene el 100% de la lógica y funcionalidad que ya
+existía (Supabase, offline, exportaciones, notificaciones, cálculos
+automáticos...) — solo se ha rediseñado la experiencia visual y de
+navegación, tal y como se pidió.
+
 ## Próximos pasos
 
 Con esto ya tienes: nube conectada, despliegue automático, gestión de

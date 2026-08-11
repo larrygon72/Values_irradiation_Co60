@@ -45,7 +45,7 @@
     </div>
     <div class="sidebar-group">
       <div class="sidebar-group-lbl">Operación</div>
-      <button class="sidebar-link sidebar-link-primary" data-nav="form" onclick="go('form')">
+      <button class="sidebar-link sidebar-link-primary" data-nav="form" onclick="nuevoRegistro()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
         <span>Nuevo registro</span>
       </button>
@@ -112,6 +112,26 @@
     <div style="display:flex;gap:10px">
       <button class="btn bo bw" onclick="_confirmClose(false)">Cancelar</button>
       <button class="btn br bw" id="confirmOkBtn" onclick="_confirmClose(true)">Eliminar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ DETALLE DE REGISTRO ══════════ -->
+<div class="ov" id="detOv">
+  <div class="modal" style="max-width:640px">
+    <div class="mhd">
+      <div>
+        <h3 style="font-family:var(--fh);font-size:17px;font-weight:700;color:#fff">Detalle del registro</h3>
+        <div style="font-size:12px;color:rgba(255,255,255,.8)" id="detSub">—</div>
+      </div>
+      <button onclick="cerrarDetalleRegistro()" aria-label="Cerrar detalle del registro" style="color:#fff;font-size:18px;padding:4px">✕</button>
+    </div>
+    <div class="mbdy" id="detBody"></div>
+    <div class="mft" style="flex-wrap:wrap">
+      <button class="btn bo bs" onclick="editarRegistroDesdeDetalle()">✏️ Editar</button>
+      <button class="btn bo bs" onclick="duplicarRegistroDesdeDetalle()">⧉ Duplicar</button>
+      <button class="btn bo bs" onclick="exportarRegistroDesdeDetalle()">⬇ Exportar</button>
+      <button class="btn br bs" onclick="eliminarRegistroDesdeDetalle()">🗑 Eliminar</button>
     </div>
   </div>
 </div>
@@ -283,7 +303,7 @@
   </div>
   <div class="sa" style="display:flex;flex-direction:column;gap:20px">
 
-    <button class="btn bp bw dash-cta" onclick="go('form')">
+    <button class="btn bp bw dash-cta" onclick="nuevoRegistro()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M12 5v14M5 12h14"/></svg>
       Nuevo registro
     </button>
@@ -304,6 +324,18 @@
       <div class="kpi-card">
         <div class="kpi-lbl">Pendientes de sincronizar</div>
         <div class="kpi-val" id="kpiPend">—</div>
+      </div>
+    </div>
+
+    <div>
+      <div class="dash-sect-hd">Dosis irradiada</div>
+      <div class="resumen-dosis">
+        <div class="resumen-card"><div class="resumen-lbl">Hoy</div><div class="resumen-val" id="resHoy">—</div><div class="resumen-unit">Gy</div></div>
+        <div class="resumen-card"><div class="resumen-lbl">Semana</div><div class="resumen-val" id="resSemana">—</div><div class="resumen-unit">Gy</div></div>
+        <div class="resumen-card"><div class="resumen-lbl">Mes</div><div class="resumen-val" id="resMes">—</div><div class="resumen-unit">Gy</div></div>
+      </div>
+      <div class="chart-card" id="dashChartWrap" style="display:none">
+        <canvas id="dashChart" height="140"></canvas>
       </div>
     </div>
 
@@ -458,27 +490,43 @@
     <h1>Historial</h1>
   </div>
   <div class="sa" style="display:flex;flex-direction:column;gap:14px">
-    <div class="fr2">
-      <div class="fl"><label>Desde</label><input type="date" id="hDesde"></div>
-      <div class="fl"><label>Hasta</label><input type="date" id="hHasta"></div>
-    </div>
-    <div style="display:flex;gap:10px">
-      <button class="btn bp bs" style="flex:1" onclick="buscarHistorial()">🔍 Buscar</button>
-      <button class="btn bo bs" onclick="filtroHistorialRapido()">Últimos 30 días</button>
+
+    <div class="search-bar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input type="text" id="hTexto" placeholder="Buscar registros… (conductor, irradiador, observaciones)" oninput="aplicarFiltrosHistorial()">
     </div>
 
-    <hr class="xdiv">
-    <div style="font-size:12px;color:var(--txt3);font-family:var(--fh);letter-spacing:.05em;text-transform:uppercase">Filtrar resultados</div>
-    <div class="fr2">
-      <div class="fl"><label>Conductor</label>
-        <select id="hConductor" onchange="aplicarFiltrosHistorial()"><option value="">Todos</option></select></div>
-      <div class="fl"><label>Guardado por</label>
-        <select id="hUsuario" onchange="aplicarFiltrosHistorial()"><option value="">Todos</option></select></div>
-    </div>
-    <div class="fr2">
-      <div class="fl"><label>Semana ISO</label><input type="number" id="hSemana" placeholder="Ej. 29" oninput="aplicarFiltrosHistorial()"></div>
-      <div class="fl"><label>Buscar texto</label><input type="text" id="hTexto" placeholder="Irradiador, observaciones…" oninput="aplicarFiltrosHistorial()"></div>
-    </div>
+    <details class="filters-wrap">
+      <summary>Filtros</summary>
+      <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px">
+        <div class="fr2">
+          <div class="fl"><label>Desde</label><input type="date" id="hDesde"></div>
+          <div class="fl"><label>Hasta</label><input type="date" id="hHasta"></div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button class="btn bp bs" style="flex:1" onclick="buscarHistorial()">Aplicar rango</button>
+          <button class="btn bo bs" onclick="filtroHistorialRapido()">Últimos 30 días</button>
+        </div>
+        <hr class="xdiv">
+        <div class="fr2">
+          <div class="fl"><label>Conductor</label>
+            <select id="hConductor" onchange="aplicarFiltrosHistorial()"><option value="">Todos</option></select></div>
+          <div class="fl"><label>Guardado por</label>
+            <select id="hUsuario" onchange="aplicarFiltrosHistorial()"><option value="">Todos</option></select></div>
+        </div>
+        <div class="fr2">
+          <div class="fl"><label>Irradiador</label>
+            <select id="hIrradiador" onchange="aplicarFiltrosHistorial()"><option value="">Todos</option></select></div>
+          <div class="fl"><label>Estado</label>
+            <select id="hEstado" onchange="aplicarFiltrosHistorial()">
+              <option value="">Todos</option>
+              <option value="completa">✓ Completada</option>
+              <option value="incompleta">! Incompleta</option>
+            </select></div>
+        </div>
+        <div class="fl"><label>Semana ISO</label><input type="number" id="hSemana" placeholder="Ej. 29" oninput="aplicarFiltrosHistorial()"></div>
+      </div>
+    </details>
 
     <div class="lft" id="histNote"></div>
     <div style="display:flex;gap:8px">
@@ -502,7 +550,24 @@
       </select>
     </div>
 
+    <!-- Tabla (escritorio) -->
+    <div class="hist-table-wrap" id="histTableWrap">
+      <table class="hist-table">
+        <thead>
+          <tr>
+            <th data-sort="fecha_irradiacion" onclick="ordenarHistorial('fecha_irradiacion')">Fecha <span class="sort-ico"></span></th>
+            <th data-sort="conductor_nombre" onclick="ordenarHistorial('conductor_nombre')">Conductor <span class="sort-ico"></span></th>
+            <th data-sort="n_urnas" onclick="ordenarHistorial('n_urnas')">Urnas <span class="sort-ico"></span></th>
+            <th data-sort="dosis" onclick="ordenarHistorial('dosis')">Dosis <span class="sort-ico"></span></th>
+            <th data-sort="estado" onclick="ordenarHistorial('estado')">Estado <span class="sort-ico"></span></th>
+          </tr>
+        </thead>
+        <tbody id="histTableBody"></tbody>
+      </table>
+    </div>
+    <!-- Tarjetas (móvil) -->
     <div id="histList"><div class="remp">Elige un rango de fechas y pulsa "Buscar"</div></div>
+
     <div id="histChartWrap" style="display:none;background:var(--surf);border-radius:var(--rlg);padding:14px">
       <canvas id="histChart" height="220"></canvas>
     </div>
@@ -654,7 +719,7 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
     <span>Inicio</span>
   </button>
-  <button data-nav="form" onclick="go('form')">
+  <button data-nav="form" onclick="nuevoRegistro()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
     <span>Nuevo</span>
   </button>
@@ -673,7 +738,7 @@
 <div class="drawer" id="drawer">
   <div class="drawer-hd">
     <span>Más opciones</span>
-    <button class="drawer-close" onclick="closeDrawer()">✕</button>
+    <button class="drawer-close" onclick="closeDrawer()" aria-label="Cerrar menú">✕</button>
   </div>
   <div class="drawer-grp-lbl">Operación</div>
   <button class="drawer-link" data-nav="records" onclick="go('records')">Registros</button>
