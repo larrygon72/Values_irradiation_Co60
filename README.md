@@ -450,6 +450,62 @@ existía (Supabase, offline, exportaciones, notificaciones, cálculos
 automáticos...) — solo se ha rediseñado la experiencia visual y de
 navegación, tal y como se pidió.
 
+## Cambios puntuales — irradiadores, tiempo real, µSv y Conducción
+
+Tras el rediseño completo, se pidieron varios cambios funcionales
+concretos. Van en 4 partes:
+
+### Parte A — Irradiadores y tiempos de exposición
+
+- **Tiempo de exposición real**: junto al tiempo teórico (con la tasa del
+  día exacto) hay ahora un segundo campo, "Tiempo exposición real", que
+  usa la tasa oficial del **miércoles de esa semana** — el criterio que
+  pediste.
+- **Irradiadores**: nueva pantalla de administración (solo Admin), igual
+  de completa que Usuarios pero sin cuentas ni contraseñas — son personas
+  que operan el equipo, no usuarios de la app. En el formulario, la
+  pestaña Irradiación ahora tiene un **desplegable** para elegir el
+  irradiador de esa lista (antes era texto libre).
+- **Exposición del operador**: nueva tarjeta "Registro del operador"
+  dentro de la pestaña Irradiación, con hora de inicio, hora de fin y la
+  lectura del dosímetro en **µSv** (con la letra griega correcta).
+
+### Parte B — Totales en el Historial
+
+- Al buscar por fechas en el Historial aparecen ahora 4 tarjetas con los
+  **totales del periodo filtrado**: exposición total (µSv), tiempo total
+  de ida, tiempo total de vuelta y tiempo total de viaje (ida + vuelta).
+- Nuevos tipos de gráfica: "Tiempo de exposición real" y "Exposición del
+  operador (µSv)".
+- La exportación (CSV/Excel/PDF) incluye ya todas las columnas nuevas.
+
+### Parte C — Gráfica configurable en el Dashboard
+
+En la pantalla principal (móvil y PC) hay un desplegable para elegir qué
+mostrar en la gráfica: dosis irradiada, nº de urnas, temperatura media,
+exposición del operador, tiempo de irradiación del operador, o tiempo de
+exposición real — tal y como pediste.
+
+### Parte D — Pantalla de Conducción
+
+Nueva pantalla con dos secciones:
+- **Viaje**: matrícula, kilometraje inicial/final y los **km recorridos
+  calculados solos**.
+- **Repostaje**: matrícula, km, importe pagado, precio por litro y los
+  **litros calculados solos** (importe ÷ precio), tipo de combustible
+  (Diesel XTL / Diesel / Gasolina / AdBlue) y estación de servicio.
+
+Todo se guarda en Supabase (tablas nuevas `vehiculo_viajes` y
+`repostajes`) para poder consultarlo o hacer cálculos más adelante.
+
+### Para aplicar estos cambios en tu Supabase ya existente
+
+Como se han añadido columnas y tablas nuevas, tienes que volver a
+ejecutar el SQL: entra en tu proyecto de Supabase → **SQL Editor** →
+pega **todo** el contenido actualizado de `supabase/schema.sql` → **Run**.
+Es seguro ejecutarlo aunque ya tengas datos: usa `IF NOT EXISTS` en todo,
+así que solo añade lo que falta sin tocar lo que ya había.
+
 ## Próximos pasos
 
 Con esto ya tienes: nube conectada, despliegue automático, gestión de

@@ -10,6 +10,13 @@ const msDay = 86400000;
 
 function rate(d)    { return RR * Math.exp(-LAM * (d - REF) / msDay); }
 function tExp(gy,d) { const r=rate(d); return r>0 ? gy/r : 0; }
+function miercolesDeLaSemana(d) {
+  const dt=new Date(d); dt.setHours(0,0,0,0);
+  const dow=dt.getDay(); // 0=domingo…6=sábado
+  const diff=3-(dow===0?7:dow); // ISO: miércoles=3, domingo tratado como 7
+  dt.setDate(dt.getDate()+diff);
+  return dt;
+}
 
 function isoWk(d) {
   const dt=new Date(d); dt.setHours(0,0,0,0);
@@ -35,6 +42,7 @@ const S = {
   histVista:'lista', histRaw:[], histFiltered:[],
   histSort:{campo:'fecha_irradiacion',dir:'desc'},
   editingId:null, detRegistro:null,
+  dashRegs:[],
   lastCheck:null
 };
 let _systemThemeMQ=null;
@@ -60,6 +68,8 @@ const LS = {
   setSession(s){ if(s) localStorage.setItem('vi_sess',JSON.stringify(s)); else localStorage.removeItem('vi_sess') },
   driverCache() { try{return JSON.parse(localStorage.getItem('vi_drivers')||'[]')}catch{return []} },
   setDriverCache(d){ localStorage.setItem('vi_drivers',JSON.stringify(d||[])) },
+  irradiadorCache() { try{return JSON.parse(localStorage.getItem('vi_irr')||'[]')}catch{return []} },
+  setIrradiadorCache(d){ localStorage.setItem('vi_irr',JSON.stringify(d||[])) },
   pending()   { try{return JSON.parse(localStorage.getItem('vi_pend')||'[]')}catch{return []} },
   setPending(p){ localStorage.setItem('vi_pend',JSON.stringify(p||[])) },
 };
@@ -163,6 +173,39 @@ function onConductorChange() {
   if (!sel || !codEl) return;
   const u = LS.driverCache().find(x => x.nick === sel.value);
   codEl.value = u ? (u.codigo || codigoConductor(u.nombre,u.apellido1,u.apellido2)) : '';
+  if(typeof updateStepperStatus==='function') updateStepperStatus();
+}
+
+// ── Desplegable de irradiadores (operadores) ─────────
+async function refreshIrradiadores() {
+  try {
+    const data = await apiPost('/irradiadores', { action:'listPublic', token: LS.token() });
+    LS.setIrradiadorCache(data.irradiadores || []);
+    setCloudState('ok');
+  } catch (e) {
+    setCloudState(e.isNetwork ? 'off' : 'err');
+  }
+  return LS.irradiadorCache();
+}
+function populateIrradiadorSelect(list) {
+  const sel = document.getElementById('fIrrSel');
+  if (!sel) return;
+  const items = list || LS.irradiadorCache();
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— Selecciona irradiador —</option>' +
+    items.map(u => {
+      const nombreCompleto = [u.nombre,u.apellido1,u.apellido2].filter(Boolean).join(' ') || '—';
+      return `<option value="${u.id}">${nombreCompleto}</option>`;
+    }).join('');
+  if (items.some(u => u.id === current)) sel.value = current;
+  onIrradiadorChange();
+}
+function onIrradiadorChange() {
+  const sel=document.getElementById('fIrrSel');
+  const hid=document.getElementById('fIrr');
+  if(!sel||!hid) return;
+  const u=LS.irradiadorCache().find(x=>x.id===sel.value);
+  hid.value = u ? [u.nombre,u.apellido1,u.apellido2].filter(Boolean).join(' ') : '';
   if(typeof updateStepperStatus==='function') updateStepperStatus();
 }
 
@@ -284,7 +327,9 @@ function go(id) {
   if(id==='users')      renderUsersScreen();
   if(id==='records')    renderRecs();
   if(id==='hist')       { cambiarVistaHistorial('lista'); filtroHistorialRapido(); }
-  if(id==='form')       { populateConductorSelect(); refreshDrivers().then(populateConductorSelect); renderUrnaCards(); updateStepperStatus(); }
+  if(id==='form')       { populateConductorSelect(); refreshDrivers().then(populateConductorSelect); populateIrradiadorSelect(); refreshIrradiadores().then(populateIrradiadorSelect); renderUrnaCards(); updateStepperStatus(); }
+  if(id==='irradiadores') renderIrradiadoresScreen();
+  if(id==='conduccion')   { document.getElementById('vFecha').value=tod(new Date()); document.getElementById('rFecha').value=tod(new Date()); cambiarVistaConduccion('viaje'); }
   if(id==='sl')         { setLogo(0); startLogoRotation(); }
   else                  { stopLogoRotation(); }
 
@@ -293,6 +338,7 @@ function go(id) {
   document.getElementById('sidebarAdmin').style.display=S.isAdmin?'block':'none';
   document.getElementById('drawerAdminLbl').style.display=S.isAdmin?'block':'none';
   document.getElementById('drawerUsersLink').style.display=S.isAdmin?'block':'none';
+  document.getElementById('drawerIrradiadoresLink').style.display=S.isAdmin?'block':'none';
   closeDrawer();
 }
 function nuevoRegistro() {
@@ -496,26 +542,56 @@ function renderResumenDosis(regs, hoy) {
   document.getElementById('resHoy').textContent=dHoy;
   document.getElementById('resSemana').textContent=dSemana;
   document.getElementById('resMes').textContent=dMes;
-  dibujarTendenciaDashboard(regs);
+  S.dashRegs=regs;
+  dibujarTendenciaDashboard();
 }
 let dashChartInstance=null;
-function dibujarTendenciaDashboard(regs) {
+function dibujarTendenciaDashboard() {
+  const regs=S.dashRegs||[];
   const wrap=document.getElementById('dashChartWrap');
   const canvas=document.getElementById('dashChart');
   if(!wrap||!canvas||!window.Chart||!regs.length){ if(wrap) wrap.style.display='none'; return; }
   wrap.style.display='block';
   if(dashChartInstance){ dashChartInstance.destroy(); dashChartInstance=null; }
+
+  const tipo=document.getElementById('dashChartTipo')?.value||'dosis';
+  const valorDe=(r)=>{
+    if(tipo==='dosis') return dosisRegistro(r)||0;
+    if(tipo==='urnas') return r.n_urnas||0;
+    if(tipo==='temp') return r.temp_media||0;
+    if(tipo==='expUsv') return r.exposicion_usv||0;
+    if(tipo==='tiempoOperador') return minutosEntre(r.h_inicio_irr,r.h_fin_irr);
+    if(tipo==='texpReal') return r.tiempo_exposicion_real||0;
+    return 0;
+  };
+  const UNIDADES={dosis:'Gy',urnas:'urnas',temp:'°C',expUsv:'µSv',tiempoOperador:'min',texpReal:'s'};
+  const ETIQUETAS={dosis:'Dosis',urnas:'Nº urnas',temp:'Tª media',expUsv:'Exposición',tiempoOperador:'Tiempo operador',texpReal:'Tiempo exp. real'};
+  const ES_SUMA=['dosis','urnas','expUsv','tiempoOperador'];
+  const unidad=UNIDADES[tipo]||''; const label=ETIQUETAS[tipo]||'Valor';
+
   const porDia={};
-  regs.forEach(r=>{ if(!r.fecha_irradiacion) return; porDia[r.fecha_irradiacion]=(porDia[r.fecha_irradiacion]||0)+(dosisRegistro(r)||0); });
+  regs.forEach(r=>{
+    if(!r.fecha_irradiacion) return;
+    const v=valorDe(r);
+    if(!v && v!==0) return;
+    (porDia[r.fecha_irradiacion]=porDia[r.fecha_irradiacion]||[]).push(v);
+  });
   const dias=Object.keys(porDia).sort();
+  const esSuma=ES_SUMA.includes(tipo);
+  const valores=dias.map(d=>{
+    const arr=porDia[d];
+    const suma=arr.reduce((a,b)=>a+b,0);
+    return esSuma?Math.round(suma*100)/100:Math.round((suma/arr.length)*100)/100;
+  });
+
   const cPrimary=temaColor('--blue-l'), cGrid=temaColor('--brd'), cTick=temaColor('--txt3');
   dashChartInstance=new Chart(canvas.getContext('2d'),{
     type:'bar',
-    data:{labels:dias.map(d=>fmt(pd(d))), datasets:[{label:'Dosis (Gy)',data:dias.map(d=>porDia[d]),backgroundColor:cPrimary,borderRadius:4}]},
+    data:{labels:dias.map(d=>fmt(pd(d))), datasets:[{label,data:valores,backgroundColor:cPrimary,borderRadius:4}]},
     options:{responsive:true,animation:{duration:250},
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:(ctx)=>`${ctx.formattedValue} Gy`}}},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:(ctx)=>`${ctx.formattedValue} ${unidad}`}}},
       scales:{x:{ticks:{color:cTick,maxRotation:60},grid:{display:false}},
-              y:{ticks:{color:cTick},grid:{color:cGrid},title:{display:true,text:'Gy',color:cTick}}}}
+              y:{ticks:{color:cTick},grid:{color:cGrid},title:{display:true,text:unidad,color:cTick}}}}
   });
 }
 function renderDashboardLocal(hoy) {
@@ -585,11 +661,13 @@ function updateStepperStatus() {
 function onFecha() {
   const v=document.getElementById('fchIrr').value;
   const d=pd(v);
-  if(!d){['semana','tasa','fTexp'].forEach(id=>document.getElementById(id).value='');updateStepperStatus();return;}
+  if(!d){['semana','tasa','fTexp','fTexpReal'].forEach(id=>document.getElementById(id).value='');updateStepperStatus();return;}
   const r=rate(d);
   document.getElementById('semana').value=isoWk(d);
   document.getElementById('tasa').value=r.toFixed(8);
   document.getElementById('fTexp').value=r>0?(S.dose/r).toFixed(1):'';
+  const rw=rate(miercolesDeLaSemana(d));
+  document.getElementById('fTexpReal').value=rw>0?(S.dose/rw).toFixed(1):'';
   updateStepperStatus();
 }
 function calcTm() {
@@ -790,6 +868,11 @@ async function guardar() {
   const respNick=respSel?respSel.value:'';
   const respNombre=(respSel&&respSel.selectedOptions[0])?respSel.selectedOptions[0].textContent:'';
   const respCodigo=document.getElementById('fRespCod').value;
+  const irrSel=document.getElementById('fIrrSel');
+  const irrId=irrSel?irrSel.value:'';
+  const irrNombre=(irrSel&&irrSel.selectedOptions[0]&&irrId)?irrSel.selectedOptions[0].textContent:'';
+  const irrItem=irrId?LS.irradiadorCache().find(x=>x.id===irrId):null;
+  const irrCodigo=irrItem?irrItem.codigo:'';
   const rec={
     // Campos de usuario
     fchIrr: document.getElementById('fchIrr').value,
@@ -801,7 +884,9 @@ async function guardar() {
     hVL:    document.getElementById('fHVL').value,
     ti:     document.getElementById('fTi').value,
     tf:     document.getElementById('fTf').value,
-    irr:    document.getElementById('fIrr').value,
+    irr:    irrNombre,
+    irrId, irrNombre, irrCodigo,
+    expUsv: document.getElementById('fExpUsv').value,
     dos:    document.getElementById('fDos').value,
     hIni:   document.getElementById('fHini').value,
     hFin:   document.getElementById('fHfin').value,
@@ -813,6 +898,7 @@ async function guardar() {
     semana: document.getElementById('semana').value,
     tasa:   document.getElementById('tasa').value,
     texp:   document.getElementById('fTexp').value,
+    texpReal: document.getElementById('fTexpReal').value,
     tm,
     // Metadatos
     at: new Date().toISOString(),
@@ -846,10 +932,12 @@ async function guardar() {
   toast('✓ Registro guardado');
 }
 function limpiarForm() {
-  ['fchIrr','semana','tasa','fTexp','fResp','fRespCod','fHII','fHIL','fHVI','fHVL',
-   'fTi','fTf','fTm','fIrr','fDos','fHini','fHfin','fObs']
+  ['fchIrr','semana','tasa','fTexp','fTexpReal','fResp','fRespCod','fHII','fHIL','fHVI','fHVL',
+   'fTi','fTf','fTm','fIrr','fExpUsv','fDos','fHini','fHfin','fObs']
     .forEach(id=>{const e=document.getElementById(id);if(e){e.value='';if(id==='fDos')e.readOnly=false;}});
   onConductorChange();
+  const irrSel=document.getElementById('fIrrSel'); if(irrSel) irrSel.value='';
+  onIrradiadorChange();
   S.urna1={n:'',date:'',lote:''}; S.urna2={n:'',date:'',lote:''}; S.urna3={n:'',date:'',lote:''};
   document.getElementById('totBan').style.display='none';
   const b=document.getElementById('dosWrap').querySelector('.aut'); if(b) b.remove();
@@ -1150,7 +1238,7 @@ function poblarFiltrosHistorial(regs) {
   const condActual=condSel.value, usrActual=usrSel.value, irrActual=irrSel.value;
   const conductores=[...new Map(regs.filter(r=>r.conductor_nick).map(r=>[r.conductor_nick,r.conductor_nombre||r.conductor_nick])).entries()];
   const usuarios=[...new Set(regs.map(r=>r.creado_por).filter(Boolean))].sort();
-  const irradiadores=[...new Set(regs.map(r=>r.irradiador).filter(Boolean))].sort();
+  const irradiadores=[...new Set(regs.map(r=>r.irradiador_nombre||r.irradiador).filter(Boolean))].sort();
   condSel.innerHTML='<option value="">Todos</option>'+conductores.map(([nick,nom])=>`<option value="${nick}">${nom}</option>`).join('');
   usrSel.innerHTML='<option value="">Todos</option>'+usuarios.map(u=>`<option value="${u}">${u}</option>`).join('');
   irrSel.innerHTML='<option value="">Todos</option>'+irradiadores.map(i=>`<option value="${i}">${i}</option>`).join('');
@@ -1173,20 +1261,50 @@ function aplicarFiltrosHistorial() {
   let regs=S.histRaw||[];
   if(cond) regs=regs.filter(r=>r.conductor_nick===cond);
   if(usr)  regs=regs.filter(r=>r.creado_por===usr);
-  if(irr)  regs=regs.filter(r=>r.irradiador===irr);
+  if(irr)  regs=regs.filter(r=>(r.irradiador_nombre||r.irradiador)===irr);
   if(est)  regs=regs.filter(r=>estadoRegistro(r)===est);
   if(sem)  regs=regs.filter(r=>String(r.semana_iso||'')===sem);
   if(txt)  regs=regs.filter(r=>
-    (r.irradiador||'').toLowerCase().includes(txt) ||
+    (r.irradiador_nombre||r.irradiador||'').toLowerCase().includes(txt) ||
     (r.observaciones||'').toLowerCase().includes(txt) ||
     (r.conductor_nombre||'').toLowerCase().includes(txt) ||
     (r.creado_por||'').toLowerCase().includes(txt));
   regs=ordenarRegistros(regs);
   S.histFiltered=regs;
   renderHistorial(regs);
+  calcularTotalesHistorial(regs);
   if(S.histVista==='graf') dibujarGraficaHistorial();
   const note=document.getElementById('histNote');
   if(note) note.textContent=`${regs.length} registro(s) encontrado(s)`;
+}
+function minutosEntre(hIni, hFin) {
+  if(!hIni||!hFin) return 0;
+  const [h1,m1]=hIni.split(':').map(Number);
+  const [h2,m2]=hFin.split(':').map(Number);
+  if(isNaN(h1)||isNaN(m1)||isNaN(h2)||isNaN(m2)) return 0;
+  let mins=(h2*60+m2)-(h1*60+m1);
+  if(mins<0) mins+=24*60; // por si cruza medianoche
+  return mins;
+}
+function formatMinutos(mins) {
+  const h=Math.floor(mins/60), m=Math.round(mins%60);
+  return `${h}h ${m}min`;
+}
+function calcularTotalesHistorial(regs) {
+  const wrap=document.getElementById('histTotalesWrap');
+  if(!wrap) return;
+  if(!regs.length){ wrap.style.display='none'; return; }
+  wrap.style.display='grid';
+  let totalUsv=0, totalIda=0, totalVuelta=0;
+  regs.forEach(r=>{
+    totalUsv+=parseFloat(r.exposicion_usv)||0;
+    totalIda+=minutosEntre(r.h_ida_inicio,r.h_ida_llegada);
+    totalVuelta+=minutosEntre(r.h_vuelta_inicio,r.h_vuelta_llegada);
+  });
+  document.getElementById('totExpUsv').textContent=totalUsv?totalUsv.toFixed(2):'0';
+  document.getElementById('totIda').textContent=formatMinutos(totalIda);
+  document.getElementById('totVuelta').textContent=formatMinutos(totalVuelta);
+  document.getElementById('totViaje').textContent=formatMinutos(totalIda+totalVuelta);
 }
 function ordenarHistorial(campo) {
   if(S.histSort.campo===campo) S.histSort.dir=(S.histSort.dir==='asc')?'desc':'asc';
@@ -1298,11 +1416,13 @@ function abrirDetalleRegistro(id) {
       <div class="det-sect-hd">Datos de irradiación</div>
       <div class="det-grid">
         ${item('Tasa (Gy/s)', r.tasa?parseFloat(r.tasa).toFixed(8):null)}
-        ${item('Tiempo exposición (s)', r.tiempo_exposicion)}
+        ${item('Tiempo exp. teórico (s)', r.tiempo_exposicion)}
+        ${item('Tiempo exp. real (s)', r.tiempo_exposicion_real)}
         ${item('Dosis aplicada', dosis?dosis+' Gy':null)}
         ${item('Nº urnas', r.n_urnas)}
         ${item('Dosímetros', r.dosimetros)}
-        ${item('Irradiador', r.irradiador)}
+        ${item('Irradiador', r.irradiador_nombre||r.irradiador)}
+        ${item('Exposición operador', r.exposicion_usv!=null?r.exposicion_usv+' µSv':null)}
       </div>
     </div>
     <div class="det-sect">
@@ -1343,7 +1463,10 @@ function cargarRegistroEnFormulario(r) {
   document.getElementById('fTi').value=r.temp_inicial??'';
   document.getElementById('fTf').value=r.temp_final??'';
   calcTm();
-  document.getElementById('fIrr').value=r.irradiador||'';
+  const irrSel=document.getElementById('fIrrSel');
+  if(irrSel) irrSel.value=r.irradiador_id||'';
+  onIrradiadorChange();
+  document.getElementById('fExpUsv').value=r.exposicion_usv??'';
   document.getElementById('fDos').value=r.dosimetros??'';
   document.getElementById('fHini').value=r.h_inicio_irr||'';
   document.getElementById('fHfin').value=r.h_fin_irr||'';
@@ -1433,8 +1556,16 @@ function dibujarGraficaHistorial() {
     yTitle='Gy/s'; unidad=' Gy/s';
   } else if(tipo==='texp'){
     labels=regs.map(r=>fmt(pd(r.fecha_irradiacion)));
-    datasets=[{label:'Tiempo exposición',data:regs.map(r=>r.tiempo_exposicion),borderColor:cPrimary,backgroundColor:cPrimary,tension:.3,spanGaps:true}];
+    datasets=[{label:'Tiempo exposición teórico',data:regs.map(r=>r.tiempo_exposicion),borderColor:cPrimary,backgroundColor:cPrimary,tension:.3,spanGaps:true}];
     yTitle='s'; unidad=' s';
+  } else if(tipo==='texpReal'){
+    labels=regs.map(r=>fmt(pd(r.fecha_irradiacion)));
+    datasets=[{label:'Tiempo exposición real',data:regs.map(r=>r.tiempo_exposicion_real),borderColor:cSecondary,backgroundColor:cSecondary,tension:.3,spanGaps:true}];
+    yTitle='s'; unidad=' s';
+  } else if(tipo==='expUsv'){
+    labels=regs.map(r=>fmt(pd(r.fecha_irradiacion)));
+    datasets=[{label:'Exposición operador',data:regs.map(r=>r.exposicion_usv),borderColor:cTertiary,backgroundColor:cTertiary,tension:.3,spanGaps:true}];
+    yTitle='µSv'; unidad=' µSv';
   } else if(tipo==='urnas'){
     labels=regs.map(r=>fmt(pd(r.fecha_irradiacion)));
     datasets=[{label:'Nº urnas',data:regs.map(r=>r.n_urnas),borderColor:cTertiary,backgroundColor:cTertiary,tension:.3,spanGaps:true}];
@@ -1468,15 +1599,19 @@ function dibujarGraficaHistorial() {
 
 // ── EXPORT HISTORIAL — CSV / Excel / PDF ──────────────
 function buildHistRows(regs) {
-  const header=['Fecha Irradiación','Semana ISO','Guardado por','Conductor','Código','Tasa Gy/s','Tiempo Exp.(s)','Nº Urnas','Dosímetros',
-    'H.Ida Ini','H.Ida Lle','H.Vta Ini','H.Vta Lle','Tª Ini(°C)','Tª Fin(°C)','Tª Media(°C)','Irradiador','H.Ini Irr.','H.Fin Irr.','Observaciones'];
+  const header=['Fecha Irradiación','Semana ISO','Guardado por','Conductor','Código','Tasa Gy/s',
+    'Tiempo Exp. Teórico(s)','Tiempo Exp. Real(s)','Nº Urnas','Dosímetros',
+    'H.Ida Ini','H.Ida Lle','H.Vta Ini','H.Vta Lle','Tª Ini(°C)','Tª Fin(°C)','Tª Media(°C)',
+    'Irradiador','Código Irr.','H.Ini Irr.','H.Fin Irr.','Exposición(µSv)','Observaciones'];
   const rows=regs.map(r=>[
     r.fecha_irradiacion?fmt(pd(r.fecha_irradiacion)):'',
     r.semana_iso||'', r.creado_por||'', r.conductor_nombre||'', r.conductor_codigo||'',
-    r.tasa?parseFloat(r.tasa).toFixed(8):'', r.tiempo_exposicion||'', r.n_urnas||'', r.dosimetros||'',
+    r.tasa?parseFloat(r.tasa).toFixed(8):'', r.tiempo_exposicion||'', r.tiempo_exposicion_real||'',
+    r.n_urnas||'', r.dosimetros||'',
     r.h_ida_inicio||'', r.h_ida_llegada||'', r.h_vuelta_inicio||'', r.h_vuelta_llegada||'',
     r.temp_inicial||'', r.temp_final||'', r.temp_media||'',
-    r.irradiador||'', r.h_inicio_irr||'', r.h_fin_irr||'', r.observaciones||''
+    r.irradiador_nombre||r.irradiador||'', r.irradiador_codigo||'', r.h_inicio_irr||'', r.h_fin_irr||'',
+    r.exposicion_usv||'', r.observaciones||''
   ]);
   return {header,rows};
 }
@@ -1787,6 +1922,244 @@ async function unlock(nick) {
     if(u){ u.locked=false; u.att=0; LS.setU(users); toast('✓ Usuario desbloqueado (local, sin conexión)'); }
   }
   renderUsrs();
+}
+
+// ── GESTIÓN DE IRRADIADORES (operadores) ───────────────
+let editIrrId=null;
+async function renderIrradiadoresScreen() {
+  if(!S.isAdmin){ go('menu'); toast('Solo un administrador puede ver esta pantalla'); return; }
+  const box=document.getElementById('irrList');
+  const note=document.getElementById('irrSyncNote');
+  let items=[], enNube=true;
+  try{
+    const data=await apiPost('/irradiadores',{action:'list',token:LS.token()});
+    items=data.irradiadores||[];
+    setCloudState('ok');
+  }catch(e){
+    enNube=false;
+    setCloudState(e.isNetwork?'off':'err');
+    items=LS.irradiadorCache().map(u=>({...u,activo:true}));
+  }
+  if(note) note.textContent=enNube?'':'⚠ Mostrando la última lista descargada (sin conexión con la nube).';
+  box.innerHTML=items.length===0
+    ?'<div style="font-size:13px;color:var(--txt3)">No hay irradiadores dados de alta</div>'
+    :items.map(u=>{
+      if(editIrrId===u.id) return filaIrrEdicion(u);
+      const nombreCompleto=[u.nombre,u.apellido1,u.apellido2].filter(Boolean).join(' ');
+      return `
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--brd);font-size:13px;flex-wrap:wrap">
+        <span style="font-family:var(--fmono);font-size:11px;font-weight:700;background:rgba(76,110,245,.18);color:var(--blue-l);padding:2px 6px;border-radius:4px;flex-shrink:0">${u.codigo||'—'}</span>
+        <span style="flex:1;font-weight:600">${nombreCompleto}${u.activo===false?' <span style="color:var(--txt3);font-weight:400">(inactivo)</span>':''}</span>
+        <button class="btn bo bs" style="padding:3px 8px;font-size:11px" onclick="editarIrrInicio('${u.id}')">✏️ Editar</button>
+        <button class="btn br bs" style="padding:3px 8px;font-size:11px" onclick="delIrradiador('${u.id}')">Eliminar</button>
+      </div>`;
+    }).join('');
+}
+function filaIrrEdicion(u) {
+  const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  return `
+  <div style="padding:10px;margin-top:8px;border:1px solid var(--brd3);border-radius:10px;background:rgba(76,110,245,.06);display:flex;flex-direction:column;gap:10px">
+    <div style="font-weight:700;font-family:var(--fh)">Editando irradiador</div>
+    <div class="fr2">
+      <div class="fl"><label>Nombre</label><input type="text" id="eu_irr_nombre" value="${esc(u.nombre)}"></div>
+      <div class="fl"><label>1er apellido</label><input type="text" id="eu_irr_ap1" value="${esc(u.apellido1)}"></div>
+    </div>
+    <div class="fl"><label>2º apellido</label><input type="text" id="eu_irr_ap2" value="${esc(u.apellido2)}"></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt2)">
+      <input type="checkbox" id="eu_irr_activo" ${u.activo!==false?'checked':''} style="width:auto">
+      Activo (aparece en el desplegable del formulario)
+    </label>
+    <div style="display:flex;gap:8px">
+      <button class="btn bp bs" style="flex:1" onclick="editarIrrGuardar('${u.id}')">Guardar cambios</button>
+      <button class="btn bo bs" onclick="editarIrrCancelar()">Cancelar</button>
+    </div>
+  </div>`;
+}
+function editarIrrInicio(id){ editIrrId=id; renderIrradiadoresScreen(); }
+function editarIrrCancelar(){ editIrrId=null; renderIrradiadoresScreen(); }
+async function editarIrrGuardar(id) {
+  const nombre=document.getElementById('eu_irr_nombre').value.trim();
+  const ap1=document.getElementById('eu_irr_ap1').value.trim();
+  const ap2=document.getElementById('eu_irr_ap2').value.trim();
+  const activo=document.getElementById('eu_irr_activo').checked;
+  try{
+    await apiPost('/irradiadores',{action:'editar',token:LS.token(),payload:{id,nombre,apellido1:ap1,apellido2:ap2,activo}});
+    setCloudState('ok');
+    toast('✓ Irradiador actualizado');
+  }catch(e){
+    toast('⚠ '+e.message);
+  }
+  editIrrId=null;
+  renderIrradiadoresScreen();
+  refreshIrradiadores().then(()=>populateIrradiadorSelect());
+}
+async function addIrradiador() {
+  const nombre=document.getElementById('irrNombre').value.trim();
+  const ap1=document.getElementById('irrAp1').value.trim();
+  const ap2=document.getElementById('irrAp2').value.trim();
+  if(!nombre||!ap1){toast('Rellena al menos nombre y primer apellido');return;}
+  try{
+    await apiPost('/irradiadores',{action:'crear',token:LS.token(),payload:{nombre,apellido1:ap1,apellido2:ap2}});
+    setCloudState('ok');
+    toast(`✓ Irradiador "${nombre}" creado`);
+  }catch(e){
+    toast('⚠ '+e.message); return;
+  }
+  ['irrNombre','irrAp1','irrAp2'].forEach(id=>{document.getElementById(id).value='';});
+  renderIrradiadoresScreen();
+  refreshIrradiadores().then(()=>populateIrradiadorSelect());
+}
+async function delIrradiador(id) {
+  const ok=await confirmDialog('¿Eliminar este irradiador? No se puede deshacer.',
+    {title:'Eliminar irradiador',okText:'Eliminar',okClass:'br'});
+  if(!ok) return;
+  try{
+    await apiPost('/irradiadores',{action:'eliminar',token:LS.token(),payload:{id}});
+    setCloudState('ok');
+    toast('Irradiador eliminado');
+  }catch(e){
+    toast('⚠ '+e.message);
+  }
+  renderIrradiadoresScreen();
+  refreshIrradiadores().then(()=>populateIrradiadorSelect());
+}
+
+// ── CONDUCCIÓN (viajes del vehículo + repostajes) ──────
+const FUEL_LABELS={diesel_xtl:'Diesel (XTL)',diesel:'Diesel',gasolina:'Gasolina',adblue:'AdBlue'};
+function cambiarVistaConduccion(vista) {
+  document.getElementById('condTabViaje').className='btn bs '+(vista==='viaje'?'bp':'bo');
+  document.getElementById('condTabRepostaje').className='btn bs '+(vista==='repostaje'?'bp':'bo');
+  document.getElementById('condPanelViaje').style.display=vista==='viaje'?'':'none';
+  document.getElementById('condPanelRepostaje').style.display=vista==='repostaje'?'':'none';
+  if(vista==='viaje') renderViajesList(); else renderRepostajesList();
+}
+function calcKmRecorridos() {
+  const ini=parseFloat(document.getElementById('vKmIni').value);
+  const fin=parseFloat(document.getElementById('vKmFin').value);
+  const el=document.getElementById('vKmRec');
+  el.value=(!isNaN(ini)&&!isNaN(fin)&&fin>=ini)?(fin-ini).toFixed(1):'';
+}
+function calcLitros() {
+  const importe=parseFloat(document.getElementById('rImporte').value);
+  const precio=parseFloat(document.getElementById('rPrecio').value);
+  const el=document.getElementById('rLitros');
+  el.value=(!isNaN(importe)&&!isNaN(precio)&&precio>0)?(importe/precio).toFixed(2):'';
+}
+async function guardarViaje() {
+  const matricula=document.getElementById('vMatricula').value.trim();
+  if(!matricula){toast('Introduce la matrícula del vehículo');return;}
+  const payload={
+    matricula,
+    fecha: document.getElementById('vFecha').value,
+    kmInicial: document.getElementById('vKmIni').value,
+    kmFinal: document.getElementById('vKmFin').value,
+  };
+  setBtnLoading('vGuardarBtn', true, 'Guardando…');
+  try{
+    await apiPost('/conduccion',{action:'guardarViaje',token:LS.token(),payload});
+    setCloudState('ok');
+    toast('✓ Viaje guardado');
+    ['vMatricula','vKmIni','vKmFin','vKmRec'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('vFecha').value=tod(new Date());
+    renderViajesList();
+  }catch(e){
+    toast(e.isNetwork?'⚠ Sin conexión: no se ha podido guardar el viaje':'⚠ '+e.message);
+  }
+  setBtnLoading('vGuardarBtn', false);
+}
+async function renderViajesList() {
+  const box=document.getElementById('viajesList');
+  if(!LS.token()){ box.innerHTML='<div class="remp">Inicia sesión con conexión para ver los viajes guardados.</div>'; return; }
+  box.innerHTML='<div class="remp"><span class="spin"></span>Cargando…</div>';
+  try{
+    const data=await apiPost('/conduccion',{action:'listarViajes',token:LS.token(),payload:{}});
+    const viajes=data.viajes||[];
+    if(!viajes.length){ box.innerHTML='<div class="remp">Sin viajes todavía</div>'; return; }
+    box.innerHTML=viajes.slice(0,30).map(v=>{
+      const puede=S.isAdmin||v.creado_por===S.user;
+      return `<div class="ritem">
+        <div class="rdate">🚗 ${v.matricula} ${v.fecha?'— '+fmt(pd(v.fecha)):''} <span style="color:var(--txt3);font-weight:400">· ${v.creado_por||'—'}</span></div>
+        <div class="rdets">
+          <span>Km inicial: <strong>${v.km_inicial??'—'}</strong></span>
+          <span>Km final: <strong>${v.km_final??'—'}</strong></span>
+          <span>Recorridos: <strong>${v.km_recorridos??'—'} km</strong></span>
+        </div>
+        ${puede?`<div style="margin-top:8px;text-align:right"><button class="btn br bs" style="padding:3px 10px;font-size:11px" onclick="eliminarViaje('${v.id}')">🗑 Eliminar</button></div>`:''}
+      </div>`;
+    }).join('<div style="height:8px"></div>');
+  }catch(e){
+    box.innerHTML='<div class="remp">No se ha podido consultar (sin conexión o error del servidor).</div>';
+  }
+}
+async function eliminarViaje(id) {
+  const ok=await confirmDialog('¿Eliminar este viaje? No se puede deshacer.',{title:'Eliminar viaje',okText:'Eliminar',okClass:'br'});
+  if(!ok) return;
+  try{
+    await apiPost('/conduccion',{action:'eliminarViaje',token:LS.token(),payload:{id}});
+    toast('Viaje eliminado');
+  }catch(e){ toast('⚠ '+e.message); }
+  renderViajesList();
+}
+
+async function guardarRepostaje() {
+  const matricula=document.getElementById('rMatricula').value.trim();
+  if(!matricula){toast('Introduce la matrícula del vehículo');return;}
+  const payload={
+    matricula,
+    fecha: document.getElementById('rFecha').value,
+    km: document.getElementById('rKm').value,
+    importe: document.getElementById('rImporte').value,
+    precioLitro: document.getElementById('rPrecio').value,
+    tipoCombustible: document.getElementById('rTipo').value,
+    estacionServicio: document.getElementById('rEstacion').value.trim(),
+  };
+  setBtnLoading('rGuardarBtn', true, 'Guardando…');
+  try{
+    await apiPost('/conduccion',{action:'guardarRepostaje',token:LS.token(),payload});
+    setCloudState('ok');
+    toast('✓ Repostaje guardado');
+    ['rMatricula','rKm','rImporte','rPrecio','rLitros','rEstacion'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('rFecha').value=tod(new Date());
+    renderRepostajesList();
+  }catch(e){
+    toast(e.isNetwork?'⚠ Sin conexión: no se ha podido guardar el repostaje':'⚠ '+e.message);
+  }
+  setBtnLoading('rGuardarBtn', false);
+}
+async function renderRepostajesList() {
+  const box=document.getElementById('repostajesList');
+  if(!LS.token()){ box.innerHTML='<div class="remp">Inicia sesión con conexión para ver los repostajes guardados.</div>'; return; }
+  box.innerHTML='<div class="remp"><span class="spin"></span>Cargando…</div>';
+  try{
+    const data=await apiPost('/conduccion',{action:'listarRepostajes',token:LS.token(),payload:{}});
+    const rep=data.repostajes||[];
+    if(!rep.length){ box.innerHTML='<div class="remp">Sin repostajes todavía</div>'; return; }
+    box.innerHTML=rep.slice(0,30).map(r=>{
+      const puede=S.isAdmin||r.creado_por===S.user;
+      return `<div class="ritem">
+        <div class="rdate">⛽ ${r.matricula} ${r.fecha?'— '+fmt(pd(r.fecha)):''} <span style="color:var(--txt3);font-weight:400">· ${FUEL_LABELS[r.tipo_combustible]||'—'}</span></div>
+        <div class="rdets">
+          <span>Km: <strong>${r.km??'—'}</strong></span>
+          <span>Importe: <strong>${r.importe??'—'} €</strong></span>
+          <span>€/L: <strong>${r.precio_litro??'—'}</strong></span>
+          <span>Litros: <strong>${r.litros??'—'} L</strong></span>
+          <span>Estación: <strong>${r.estacion_servicio||'—'}</strong></span>
+        </div>
+        ${puede?`<div style="margin-top:8px;text-align:right"><button class="btn br bs" style="padding:3px 10px;font-size:11px" onclick="eliminarRepostaje('${r.id}')">🗑 Eliminar</button></div>`:''}
+      </div>`;
+    }).join('<div style="height:8px"></div>');
+  }catch(e){
+    box.innerHTML='<div class="remp">No se ha podido consultar (sin conexión o error del servidor).</div>';
+  }
+}
+async function eliminarRepostaje(id) {
+  const ok=await confirmDialog('¿Eliminar este repostaje? No se puede deshacer.',{title:'Eliminar repostaje',okText:'Eliminar',okClass:'br'});
+  if(!ok) return;
+  try{
+    await apiPost('/conduccion',{action:'eliminarRepostaje',token:LS.token(),payload:{id}});
+    toast('Repostaje eliminado');
+  }catch(e){ toast('⚠ '+e.message); }
+  renderRepostajesList();
 }
 
 // ── LOGO GALLERY ──────────────────────────────────────

@@ -95,3 +95,89 @@ alter table registros enable row level security;
 insert into usuarios (nick, password_hash, nombre, apellido1, apellido2, role, locked, intentos)
 select 'Admin', '$2b$10$g3dxTMRKRu9jRJcc4d/Mi.IoeqRQlMYSBpmttJshwdHjEbf9u0.xm', 'Admin', 'Admin', '', 'admin', false, 0
 where not exists (select 1 from usuarios where lower(nick) = 'admin');
+
+-- ════════════════════════════════════════════════════════════
+-- AMPLIACIÓN — Irradiadores (operadores) + tiempo de exposición
+-- real (miércoles de la semana) + exposición del operador en µSv
+-- ════════════════════════════════════════════════════════════
+
+-- ── TABLA: irradiadores ──────────────────────────────────────
+-- Personas que operan el equipo de irradiación. Son distintas de los
+-- conductores/usuarios: no inician sesión en la app, solo se eligen en
+-- un desplegable al rellenar un registro. Solo un Admin puede darlos de
+-- alta, editarlos o eliminarlos.
+create table if not exists irradiadores (
+  id         uuid primary key default gen_random_uuid(),
+  nombre     text not null default '',
+  apellido1  text not null default '',
+  apellido2  text default '',
+  activo     boolean not null default true,
+  created_at timestamptz not null default now()
+);
+alter table irradiadores drop column if exists codigo;
+alter table irradiadores add column codigo text generated always as (
+  upper(
+    coalesce(nullif(left(nombre,1),''),'?') ||
+    coalesce(nullif(left(apellido1,1),''),'?') ||
+    case when coalesce(apellido2,'') = '' then 'X' else left(apellido2,1) end
+  )
+) stored;
+alter table irradiadores enable row level security;
+
+-- ── NUEVAS COLUMNAS EN registros ─────────────────────────────
+-- tiempo_exposicion       -> ya existía: el tiempo TEÓRICO (tasa del día exacto)
+-- tiempo_exposicion_real  -> NUEVO: el tiempo real, calculado con la tasa
+--                            del MIÉRCOLES de esa semana (referencia oficial)
+-- exposicion_usv          -> NUEVO: lo que ha marcado el dosímetro del
+--                            operador durante la irradiación, en microsieverts
+-- irradiador_id/_nombre/_codigo -> NUEVO: referencia al operador elegido
+--                            en el desplegable (la columna "irradiador" de
+--                            texto libre se mantiene por compatibilidad
+--                            con registros antiguos, pero ya no se usa)
+alter table registros add column if not exists tiempo_exposicion_real numeric;
+alter table registros add column if not exists exposicion_usv numeric;
+alter table registros add column if not exists irradiador_id uuid references irradiadores(id) on delete set null;
+alter table registros add column if not exists irradiador_nombre text;
+alter table registros add column if not exists irradiador_codigo text;
+
+-- ════════════════════════════════════════════════════════════
+-- AMPLIACIÓN — Pantalla de Conducción: viajes del vehículo y
+-- repostajes de combustible, para cálculos y consultas futuras.
+-- ════════════════════════════════════════════════════════════
+
+-- ── TABLA: vehiculo_viajes ────────────────────────────────────
+create table if not exists vehiculo_viajes (
+  id             uuid primary key default gen_random_uuid(),
+  matricula      text not null,
+  fecha          date,
+  km_inicial     numeric,
+  km_final       numeric,
+  creado_por     text not null,
+  created_at     timestamptz not null default now()
+);
+alter table vehiculo_viajes drop column if exists km_recorridos;
+alter table vehiculo_viajes add column km_recorridos numeric generated always as (
+  case when km_final is not null and km_inicial is not null then km_final - km_inicial else null end
+) stored;
+alter table vehiculo_viajes enable row level security;
+
+-- ── TABLA: repostajes ─────────────────────────────────────────
+-- tipo_combustible: 'diesel_xtl' | 'diesel' | 'gasolina' | 'adblue'
+create table if not exists repostajes (
+  id                 uuid primary key default gen_random_uuid(),
+  matricula          text not null,
+  fecha              date,
+  km                 numeric,
+  importe            numeric,
+  precio_litro       numeric,
+  tipo_combustible   text check (tipo_combustible in ('diesel_xtl','diesel','gasolina','adblue')),
+  estacion_servicio  text,
+  creado_por         text not null,
+  created_at         timestamptz not null default now()
+);
+alter table repostajes drop column if exists litros;
+alter table repostajes add column litros numeric generated always as (
+  case when precio_litro is not null and precio_litro > 0 and importe is not null
+       then round((importe/precio_litro)::numeric,2) else null end
+) stored;
+alter table repostajes enable row level security;

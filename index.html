@@ -61,6 +61,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
         <span>Multi-Dosis</span>
       </button>
+      <button class="sidebar-link" data-nav="conduccion" onclick="go('conduccion')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 17h14M5 17a2 2 0 100 4 2 2 0 000-4zM19 17a2 2 0 100 4 2 2 0 000-4zM5 17l1.5-6h11L19 17M6.5 11l1-3h9l1 3"/></svg>
+        <span>Conducción</span>
+      </button>
     </div>
     <div class="sidebar-group">
       <div class="sidebar-group-lbl">Análisis</div>
@@ -82,6 +86,10 @@
       <button class="sidebar-link" data-nav="users" onclick="go('users')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
         <span>Usuarios</span>
+      </button>
+      <button class="sidebar-link" data-nav="irradiadores" onclick="go('irradiadores')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-7 8-7s8 3 8 7"/><path d="M12 2v2M12 12v2"/></svg>
+        <span>Irradiadores</span>
       </button>
       <button class="sidebar-link" data-nav="settings" onclick="go('settings')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09A1.65 1.65 0 0015 4.6a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9c.14.31.22.65.23 1H21a2 2 0 010 4h-.09c-.14.31-.22.65-.23 1z"/></svg>
@@ -334,6 +342,17 @@
         <div class="resumen-card"><div class="resumen-lbl">Semana</div><div class="resumen-val" id="resSemana">—</div><div class="resumen-unit">Gy</div></div>
         <div class="resumen-card"><div class="resumen-lbl">Mes</div><div class="resumen-val" id="resMes">—</div><div class="resumen-unit">Gy</div></div>
       </div>
+      <div class="fl" style="margin-bottom:8px">
+        <label>Gráfica</label>
+        <select id="dashChartTipo" onchange="dibujarTendenciaDashboard()">
+          <option value="dosis">Dosis irradiada (Gy)</option>
+          <option value="urnas">Nº de urnas</option>
+          <option value="temp">Temperatura media (°C)</option>
+          <option value="expUsv">Exposición del operador (µSv)</option>
+          <option value="tiempoOperador">Tiempo de irradiación del operador (min)</option>
+          <option value="texpReal">Tiempo de exposición real (s)</option>
+        </select>
+      </div>
       <div class="chart-card" id="dashChartWrap" style="display:none">
         <canvas id="dashChart" height="140"></canvas>
       </div>
@@ -443,18 +462,37 @@
 
     <!-- TAB IRRADIA -->
     <div class="tp" id="tp-irradia">
-      <div class="fl"><label>Irradiador</label>
-        <input type="text" id="fIrr" placeholder="Nombre / ID del irradiador" oninput="updateStepperStatus()"></div>
-      <div class="fl auto-fl"><label>⚙ Tiempo exposición (s)</label>
-        <div class="cfr"><input type="text" id="fTexp" readonly placeholder="—"><span class="aut">auto</span></div>
-        <span class="fhint">Se calcula con la dosis programada y la tasa del día.</span></div>
+      <div class="fl">
+        <label>Irradiador (operador)</label>
+        <select id="fIrrSel" onchange="onIrradiadorChange()">
+          <option value="">— Selecciona irradiador —</option>
+        </select>
+      </div>
+      <input type="hidden" id="fIrr">
+      <div class="fr2">
+        <div class="fl auto-fl"><label>⚙ Tiempo exposición teórico (s)</label>
+          <div class="cfr"><input type="text" id="fTexp" readonly placeholder="—"><span class="aut">auto</span></div>
+          <span class="fhint">Con la tasa del día exacto de irradiación.</span></div>
+        <div class="fl auto-fl"><label>⚙ Tiempo exposición real (s)</label>
+          <div class="cfr"><input type="text" id="fTexpReal" readonly placeholder="—"><span class="aut">auto</span></div>
+          <span class="fhint">Con la tasa oficial del miércoles de esa semana.</span></div>
+      </div>
       <div class="fl"><label>Dosímetros</label>
         <div class="cfr" id="dosWrap">
           <input type="number" id="fDos" placeholder="Nº dosímetros" min="1">
         </div></div>
-      <div class="fr2">
-        <div class="fl"><label>H. inicio irradiación</label><input type="time" id="fHini"></div>
-        <div class="fl"><label>H. fin irradiación</label><input type="time" id="fHfin"></div>
+
+      <div class="dash-sect-hd" style="margin-top:4px">Exposición del operador</div>
+      <div class="card" style="height:auto">
+        <div class="cardh" style="background:var(--grad-btn)">Registro del operador</div>
+        <div class="cardb">
+          <div class="fr2">
+            <div class="fl"><label>H. inicio irradiación</label><input type="time" id="fHini"></div>
+            <div class="fl"><label>H. fin irradiación</label><input type="time" id="fHfin"></div>
+          </div>
+          <div class="fl"><label>Exposición (µSv)</label>
+            <input type="number" id="fExpUsv" placeholder="Lectura del dosímetro en µSv" min="0" step="0.01"></div>
+        </div>
       </div>
     </div>
 
@@ -529,6 +567,14 @@
     </details>
 
     <div class="lft" id="histNote"></div>
+
+    <div class="resumen-dosis" id="histTotalesWrap" style="display:none;grid-template-columns:1fr 1fr">
+      <div class="resumen-card"><div class="resumen-lbl">Exposición total</div><div class="resumen-val" id="totExpUsv">—</div><div class="resumen-unit">µSv</div></div>
+      <div class="resumen-card"><div class="resumen-lbl">Tiempo de viaje total</div><div class="resumen-val" id="totViaje" style="font-size:15px">—</div><div class="resumen-unit">ida + vuelta</div></div>
+      <div class="resumen-card"><div class="resumen-lbl">Tiempo total de ida</div><div class="resumen-val" id="totIda" style="font-size:15px">—</div><div class="resumen-unit">&nbsp;</div></div>
+      <div class="resumen-card"><div class="resumen-lbl">Tiempo total de vuelta</div><div class="resumen-val" id="totVuelta" style="font-size:15px">—</div><div class="resumen-unit">&nbsp;</div></div>
+    </div>
+
     <div style="display:flex;gap:8px">
       <button class="btn bor bs" style="flex:1" onclick="exportHistCSV()">⬇ CSV</button>
       <button class="btn bor bs" style="flex:1" onclick="exportHistXLSX()">⬇ Excel</button>
@@ -544,7 +590,9 @@
       <select id="hChartTipo" onchange="dibujarGraficaHistorial()">
         <option value="temp">Temperaturas (inicial / final / media)</option>
         <option value="tasa">Tasa de dosis (Gy/s)</option>
-        <option value="texp">Tiempo de exposición (s)</option>
+        <option value="texp">Tiempo de exposición teórico (s)</option>
+        <option value="texpReal">Tiempo de exposición real (s)</option>
+        <option value="expUsv">Exposición del operador (µSv)</option>
         <option value="urnas">Nº de urnas</option>
         <option value="semana">Registros por semana</option>
       </select>
@@ -711,6 +759,90 @@
   </div>
 </div>
 
+<!-- ══════════ IRRADIADORES (administración) ══════════ -->
+<div class="sc" id="sirradiadores">
+  <div class="tb">
+    <button class="back" onclick="go('menu')">← Volver</button>
+    <h1>Irradiadores</h1>
+  </div>
+  <div class="sa" style="display:flex;flex-direction:column;gap:16px">
+    <p class="thhint" style="margin:0">Personas que operan el equipo de irradiación. No inician sesión en la app — solo aparecen en el desplegable del formulario.</p>
+    <div class="ssc">
+      <h3>Dar de alta un irradiador</h3>
+      <div class="fr2">
+        <div class="fl"><label>Nombre</label><input type="text" id="irrNombre" placeholder="Nombre"></div>
+        <div class="fl"><label>1er apellido</label><input type="text" id="irrAp1" placeholder="Primer apellido"></div>
+      </div>
+      <div class="fl"><label>2º apellido (opcional)</label><input type="text" id="irrAp2" placeholder="Segundo apellido"></div>
+      <button class="btn bp bw" onclick="addIrradiador()">Añadir irradiador</button>
+      <hr class="xdiv">
+      <div id="irrList"></div>
+      <div class="lft" id="irrSyncNote" style="margin-top:6px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ CONDUCCIÓN (vehículo + repostajes) ══════════ -->
+<div class="sc" id="sconduccion">
+  <div class="tb">
+    <button class="back" onclick="go('menu')">← Volver</button>
+    <h1>Conducción</h1>
+  </div>
+  <div class="sa" style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;gap:8px">
+      <button class="btn bp bs" id="condTabViaje" style="flex:1" onclick="cambiarVistaConduccion('viaje')">🚗 Viaje</button>
+      <button class="btn bo bs" id="condTabRepostaje" style="flex:1" onclick="cambiarVistaConduccion('repostaje')">⛽ Repostaje</button>
+    </div>
+
+    <!-- VIAJE -->
+    <div id="condPanelViaje">
+      <div class="ssc">
+        <h3>Nuevo viaje</h3>
+        <div class="fl"><label>Matrícula</label><input type="text" id="vMatricula" placeholder="Ej. 1234 ABC" style="text-transform:uppercase"></div>
+        <div class="fl"><label>Fecha</label><input type="date" id="vFecha"></div>
+        <div class="fr2">
+          <div class="fl"><label>Km inicial</label><input type="number" id="vKmIni" placeholder="0" min="0" oninput="calcKmRecorridos()"></div>
+          <div class="fl"><label>Km final</label><input type="number" id="vKmFin" placeholder="0" min="0" oninput="calcKmRecorridos()"></div>
+        </div>
+        <div class="fl auto-fl"><label>⚙ Km recorridos</label>
+          <div class="cfr"><input type="text" id="vKmRec" readonly placeholder="—"><span class="aut">auto</span></div></div>
+        <button class="btn bp bw" id="vGuardarBtn" onclick="guardarViaje()">Guardar viaje</button>
+      </div>
+      <div class="dash-sect-hd" style="margin-top:16px">Viajes recientes</div>
+      <div id="viajesList"><div class="remp">Sin viajes todavía</div></div>
+    </div>
+
+    <!-- REPOSTAJE -->
+    <div id="condPanelRepostaje" style="display:none">
+      <div class="ssc">
+        <h3>Nuevo repostaje</h3>
+        <div class="fl"><label>Matrícula</label><input type="text" id="rMatricula" placeholder="Ej. 1234 ABC" style="text-transform:uppercase"></div>
+        <div class="fr2">
+          <div class="fl"><label>Fecha</label><input type="date" id="rFecha"></div>
+          <div class="fl"><label>Km</label><input type="number" id="rKm" placeholder="0" min="0"></div>
+        </div>
+        <div class="fl"><label>Tipo de combustible</label>
+          <select id="rTipo">
+            <option value="diesel_xtl">Diesel (XTL)</option>
+            <option value="diesel">Diesel</option>
+            <option value="gasolina">Gasolina</option>
+            <option value="adblue">AdBlue</option>
+          </select></div>
+        <div class="fr2">
+          <div class="fl"><label>Importe (€)</label><input type="number" id="rImporte" placeholder="0.00" min="0" step="0.01" oninput="calcLitros()"></div>
+          <div class="fl"><label>Precio por litro (€/L)</label><input type="number" id="rPrecio" placeholder="0.000" min="0" step="0.001" oninput="calcLitros()"></div>
+        </div>
+        <div class="fl auto-fl"><label>⚙ Litros añadidos</label>
+          <div class="cfr"><input type="text" id="rLitros" readonly placeholder="—"><span class="aut">auto</span></div></div>
+        <div class="fl"><label>Estación de servicio</label><input type="text" id="rEstacion" placeholder="Nombre de la estación"></div>
+        <button class="btn bp bw" id="rGuardarBtn" onclick="guardarRepostaje()">Guardar repostaje</button>
+      </div>
+      <div class="dash-sect-hd" style="margin-top:16px">Repostajes recientes</div>
+      <div id="repostajesList"><div class="remp">Sin repostajes todavía</div></div>
+    </div>
+  </div>
+</div>
+
 </div>
 
 <!-- ══════════ BOTTOM NAV (móvil) ══════════ -->
@@ -743,12 +875,14 @@
   <div class="drawer-grp-lbl">Operación</div>
   <button class="drawer-link" data-nav="records" onclick="go('records')">Registros</button>
   <button class="drawer-link" data-nav="multidosis" onclick="go('multidosis')">Multi-Dosis</button>
+  <button class="drawer-link" data-nav="conduccion" onclick="go('conduccion')">Conducción</button>
   <div class="drawer-grp-lbl">Análisis</div>
   <button class="drawer-link" data-nav="today" onclick="go('today')">Dosis hoy</button>
   <button class="drawer-link" data-nav="month" onclick="go('month')">Dosis mensual</button>
   <button class="drawer-link" data-nav="weekly" onclick="go('weekly')">Resumen anual</button>
   <div class="drawer-grp-lbl" id="drawerAdminLbl" style="display:none">Administración</div>
   <button class="drawer-link" id="drawerUsersLink" data-nav="users" onclick="go('users')" style="display:none">Usuarios</button>
+  <button class="drawer-link" id="drawerIrradiadoresLink" data-nav="irradiadores" onclick="go('irradiadores')" style="display:none">Irradiadores</button>
   <button class="drawer-link" data-nav="settings" onclick="go('settings')">Ajustes</button>
   <hr class="xdiv">
   <button class="drawer-link" style="color:var(--red-l)" onclick="confirmLogout()">Cerrar sesión</button>
