@@ -91,6 +91,14 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-7 8-7s8 3 8 7"/><path d="M12 2v2M12 12v2"/></svg>
         <span>Irradiadores</span>
       </button>
+      <button class="sidebar-link" data-nav="vehiculos" onclick="go('vehiculos')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 17h14M5 17a2 2 0 100 4 2 2 0 000-4zM19 17a2 2 0 100 4 2 2 0 000-4zM5 17l1.5-6h11L19 17M6.5 11l1-3h9l1 3"/></svg>
+        <span>Vehículos</span>
+      </button>
+      <button class="sidebar-link" data-nav="estaciones" onclick="go('estaciones')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 22V5a2 2 0 012-2h8a2 2 0 012 2v17M3 22h12M8 10h2M14 8l3 3v6a1.5 1.5 0 003 0v-4l-2-2"/></svg>
+        <span>Estaciones</span>
+      </button>
       <button class="sidebar-link" data-nav="settings" onclick="go('settings')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09A1.65 1.65 0 0015 4.6a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9c.14.31.22.65.23 1H21a2 2 0 010 4h-.09c-.14.31-.22.65-.23 1z"/></svg>
         <span>Ajustes</span>
@@ -782,6 +790,45 @@
   </div>
 </div>
 
+<!-- ══════════ VEHÍCULOS (administración) ══════════ -->
+<div class="sc" id="svehiculos">
+  <div class="tb">
+    <button class="back" onclick="go('menu')">← Volver</button>
+    <h1>Vehículos</h1>
+  </div>
+  <div class="sa" style="display:flex;flex-direction:column;gap:16px">
+    <p class="thhint" style="margin:0">Vehículos disponibles para el desplegable de Conducción. Cualquier usuario puede darlos de alta al vuelo si no encuentra la matrícula; aquí se pueden editar, desactivar o eliminar.</p>
+    <div class="ssc">
+      <h3>Dar de alta un vehículo</h3>
+      <div class="fl"><label>Matrícula</label><input type="text" id="vehMatricula" placeholder="Ej. 1234 ABC" style="text-transform:uppercase"></div>
+      <div class="fl"><label>Número de obra</label><input type="text" id="vehObra" placeholder="Ej. OB-2026-014"></div>
+      <button class="btn bp bw" onclick="addVehiculo()">Añadir vehículo</button>
+      <hr class="xdiv">
+      <div id="vehList"></div>
+      <div class="lft" id="vehSyncNote" style="margin-top:6px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ ESTACIONES DE SERVICIO (administración) ══════════ -->
+<div class="sc" id="sestaciones">
+  <div class="tb">
+    <button class="back" onclick="go('menu')">← Volver</button>
+    <h1>Estaciones</h1>
+  </div>
+  <div class="sa" style="display:flex;flex-direction:column;gap:16px">
+    <p class="thhint" style="margin:0">Estaciones de servicio disponibles para el desplegable de Repostaje. Cualquier usuario puede darlas de alta al vuelo si no encuentra el nombre; aquí se pueden editar, desactivar o eliminar.</p>
+    <div class="ssc">
+      <h3>Dar de alta una estación</h3>
+      <div class="fl"><label>Nombre</label><input type="text" id="estNombre" placeholder="Nombre de la estación"></div>
+      <button class="btn bp bw" onclick="addEstacion()">Añadir estación</button>
+      <hr class="xdiv">
+      <div id="estList"></div>
+      <div class="lft" id="estSyncNote" style="margin-top:6px"></div>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════ CONDUCCIÓN (vehículo + repostajes) ══════════ -->
 <div class="sc" id="sconduccion">
   <div class="tb">
@@ -798,7 +845,22 @@
     <div id="condPanelViaje">
       <div class="ssc">
         <h3>Nuevo viaje</h3>
-        <div class="fl"><label>Matrícula</label><input type="text" id="vMatricula" placeholder="Ej. 1234 ABC" style="text-transform:uppercase"></div>
+        <div class="fl"><label>Matrícula</label>
+          <select id="vMatricula" onchange="onVehiculoChange('v')">
+            <option value="">— Selecciona vehículo —</option>
+            <option value="__new__">+ Añadir vehículo nuevo…</option>
+          </select></div>
+        <div class="fl auto-fl" id="vObraWrap"><label>⚙ Número de obra</label>
+          <div class="cfr"><input type="text" id="vObra" readonly placeholder="—"><span class="aut">auto</span></div></div>
+        <div id="vNuevoVehiculo" style="display:none;padding:10px;border:1px solid var(--brd3);border-radius:10px;background:rgba(76,110,245,.06);flex-direction:column;gap:10px">
+          <div style="font-weight:700;font-family:var(--fh)">Vehículo nuevo</div>
+          <div class="fl"><label>Matrícula</label><input type="text" id="vMatriculaNueva" placeholder="Ej. 1234 ABC" style="text-transform:uppercase"></div>
+          <div class="fl"><label>Número de obra</label><input type="text" id="vObraNueva" placeholder="Ej. OB-2026-014"></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn bp bs" style="flex:1" onclick="crearVehiculoInline('v')">Crear y usar este vehículo</button>
+            <button class="btn bo bs" onclick="cancelarVehiculoNuevo('v')">Cancelar</button>
+          </div>
+        </div>
         <div class="fl"><label>Fecha</label><input type="date" id="vFecha"></div>
         <div class="fr2">
           <div class="fl"><label>Km inicial</label><input type="number" id="vKmIni" placeholder="0" min="0" oninput="calcKmRecorridos()"></div>
@@ -816,7 +878,22 @@
     <div id="condPanelRepostaje" style="display:none">
       <div class="ssc">
         <h3>Nuevo repostaje</h3>
-        <div class="fl"><label>Matrícula</label><input type="text" id="rMatricula" placeholder="Ej. 1234 ABC" style="text-transform:uppercase"></div>
+        <div class="fl"><label>Matrícula</label>
+          <select id="rMatricula" onchange="onVehiculoChange('r')">
+            <option value="">— Selecciona vehículo —</option>
+            <option value="__new__">+ Añadir vehículo nuevo…</option>
+          </select></div>
+        <div class="fl auto-fl" id="rObraWrap"><label>⚙ Número de obra</label>
+          <div class="cfr"><input type="text" id="rObra" readonly placeholder="—"><span class="aut">auto</span></div></div>
+        <div id="rNuevoVehiculo" style="display:none;padding:10px;border:1px solid var(--brd3);border-radius:10px;background:rgba(76,110,245,.06);flex-direction:column;gap:10px">
+          <div style="font-weight:700;font-family:var(--fh)">Vehículo nuevo</div>
+          <div class="fl"><label>Matrícula</label><input type="text" id="rMatriculaNueva" placeholder="Ej. 1234 ABC" style="text-transform:uppercase"></div>
+          <div class="fl"><label>Número de obra</label><input type="text" id="rObraNueva" placeholder="Ej. OB-2026-014"></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn bp bs" style="flex:1" onclick="crearVehiculoInline('r')">Crear y usar este vehículo</button>
+            <button class="btn bo bs" onclick="cancelarVehiculoNuevo('r')">Cancelar</button>
+          </div>
+        </div>
         <div class="fr2">
           <div class="fl"><label>Fecha</label><input type="date" id="rFecha"></div>
           <div class="fl"><label>Km</label><input type="number" id="rKm" placeholder="0" min="0"></div>
@@ -834,7 +911,19 @@
         </div>
         <div class="fl auto-fl"><label>⚙ Litros añadidos</label>
           <div class="cfr"><input type="text" id="rLitros" readonly placeholder="—"><span class="aut">auto</span></div></div>
-        <div class="fl"><label>Estación de servicio</label><input type="text" id="rEstacion" placeholder="Nombre de la estación"></div>
+        <div class="fl"><label>Estación de servicio</label>
+          <select id="rEstacion" onchange="onEstacionChange('r')">
+            <option value="">— Selecciona estación (opcional) —</option>
+            <option value="__new__">+ Añadir estación nueva…</option>
+          </select></div>
+        <div id="rNuevaEstacion" style="display:none;padding:10px;border:1px solid var(--brd3);border-radius:10px;background:rgba(76,110,245,.06);flex-direction:column;gap:10px">
+          <div style="font-weight:700;font-family:var(--fh)">Estación nueva</div>
+          <div class="fl"><label>Nombre</label><input type="text" id="rEstacionNombreNueva" placeholder="Nombre de la estación"></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn bp bs" style="flex:1" onclick="crearEstacionInline('r')">Crear y usar esta estación</button>
+            <button class="btn bo bs" onclick="cancelarEstacionNueva('r')">Cancelar</button>
+          </div>
+        </div>
         <button class="btn bp bw" id="rGuardarBtn" onclick="guardarRepostaje()">Guardar repostaje</button>
       </div>
       <div class="dash-sect-hd" style="margin-top:16px">Repostajes recientes</div>
@@ -883,6 +972,8 @@
   <div class="drawer-grp-lbl" id="drawerAdminLbl" style="display:none">Administración</div>
   <button class="drawer-link" id="drawerUsersLink" data-nav="users" onclick="go('users')" style="display:none">Usuarios</button>
   <button class="drawer-link" id="drawerIrradiadoresLink" data-nav="irradiadores" onclick="go('irradiadores')" style="display:none">Irradiadores</button>
+  <button class="drawer-link" id="drawerVehiculosLink" data-nav="vehiculos" onclick="go('vehiculos')" style="display:none">Vehículos</button>
+  <button class="drawer-link" id="drawerEstacionesLink" data-nav="estaciones" onclick="go('estaciones')" style="display:none">Estaciones</button>
   <button class="drawer-link" data-nav="settings" onclick="go('settings')">Ajustes</button>
   <hr class="xdiv">
   <button class="drawer-link" style="color:var(--red-l)" onclick="confirmLogout()">Cerrar sesión</button>

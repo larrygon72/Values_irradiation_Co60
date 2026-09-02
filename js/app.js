@@ -70,6 +70,10 @@ const LS = {
   setDriverCache(d){ localStorage.setItem('vi_drivers',JSON.stringify(d||[])) },
   irradiadorCache() { try{return JSON.parse(localStorage.getItem('vi_irr')||'[]')}catch{return []} },
   setIrradiadorCache(d){ localStorage.setItem('vi_irr',JSON.stringify(d||[])) },
+  vehiculoCache() { try{return JSON.parse(localStorage.getItem('vi_veh')||'[]')}catch{return []} },
+  setVehiculoCache(d){ localStorage.setItem('vi_veh',JSON.stringify(d||[])) },
+  estacionCache() { try{return JSON.parse(localStorage.getItem('vi_est')||'[]')}catch{return []} },
+  setEstacionCache(d){ localStorage.setItem('vi_est',JSON.stringify(d||[])) },
   pending()   { try{return JSON.parse(localStorage.getItem('vi_pend')||'[]')}catch{return []} },
   setPending(p){ localStorage.setItem('vi_pend',JSON.stringify(p||[])) },
 };
@@ -209,6 +213,134 @@ function onIrradiadorChange() {
   if(typeof updateStepperStatus==='function') updateStepperStatus();
 }
 
+// ── Desplegable de vehículos (matrícula, en Conducción) ──
+// Gestión de vehículos disponibles: el campo "Matrícula" de Conducción
+// es un desplegable alimentado por la tabla "vehiculos". Si el vehículo
+// buscado no existe, se puede crear al vuelo indicando matrícula + obra.
+async function refreshVehiculos() {
+  try {
+    const data = await apiPost('/vehiculos', { action:'listPublic', token: LS.token() });
+    LS.setVehiculoCache(data.vehiculos || []);
+    setCloudState('ok');
+  } catch (e) {
+    setCloudState(e.isNetwork ? 'off' : 'err');
+  }
+  return LS.vehiculoCache();
+}
+// prefix: 'v' (viaje) o 'r' (repostaje) — ids: {prefix}Matricula, {prefix}Obra, {prefix}NuevoVehiculo
+function populateVehiculoSelect(prefix, list) {
+  const sel = document.getElementById(prefix+'Matricula');
+  if (!sel) return;
+  const items = list || LS.vehiculoCache();
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— Selecciona vehículo —</option>' +
+    items.map(v => `<option value="${v.id}">${v.matricula}${v.numero_obra?' · Obra '+v.numero_obra:''}</option>`).join('') +
+    '<option value="__new__">+ Añadir vehículo nuevo…</option>';
+  if (items.some(v => v.id === current)) sel.value = current;
+  onVehiculoChange(prefix);
+}
+function onVehiculoChange(prefix) {
+  const sel = document.getElementById(prefix+'Matricula');
+  const obraEl = document.getElementById(prefix+'Obra');
+  const nuevoBox = document.getElementById(prefix+'NuevoVehiculo');
+  if (!sel) return;
+  if (sel.value === '__new__') {
+    if (nuevoBox) nuevoBox.style.display = 'flex';
+    if (obraEl) obraEl.value = '';
+    return;
+  }
+  if (nuevoBox) nuevoBox.style.display = 'none';
+  const v = LS.vehiculoCache().find(x => x.id === sel.value);
+  if (obraEl) obraEl.value = v ? (v.numero_obra || '—') : '';
+}
+async function crearVehiculoInline(prefix) {
+  const matEl = document.getElementById(prefix+'MatriculaNueva');
+  const obraEl = document.getElementById(prefix+'ObraNueva');
+  const matricula = matEl.value.trim();
+  const numeroObra = obraEl.value.trim();
+  if (!matricula) { toast('Introduce la matrícula del vehículo nuevo'); return; }
+  if (!numeroObra) { toast('Introduce el número de obra del vehículo'); return; }
+  try {
+    const data = await apiPost('/vehiculos', { action:'crear', token: LS.token(), payload:{ matricula, numeroObra } });
+    setCloudState('ok');
+    toast(`✓ Vehículo "${matricula.toUpperCase()}" creado`);
+    matEl.value = ''; obraEl.value = '';
+    await refreshVehiculos();
+    populateVehiculoSelect(prefix);
+    const sel = document.getElementById(prefix+'Matricula');
+    if (data.id) sel.value = data.id;
+    onVehiculoChange(prefix);
+  } catch (e) {
+    toast(e.isNetwork ? '⚠ Sin conexión: no se ha podido crear el vehículo' : '⚠ '+e.message);
+  }
+}
+function cancelarVehiculoNuevo(prefix) {
+  const sel = document.getElementById(prefix+'Matricula');
+  if (sel) sel.value = '';
+  const nuevoBox = document.getElementById(prefix+'NuevoVehiculo');
+  if (nuevoBox) nuevoBox.style.display = 'none';
+  onVehiculoChange(prefix);
+}
+
+// ── Desplegable de estaciones de servicio (Repostaje) ────
+// Gestión de estaciones de servicio: el campo "Estación de servicio" de
+// Repostaje es un desplegable alimentado por la tabla "estaciones_servicio".
+// Si la estación buscada no existe, se puede crear al vuelo indicando su
+// nombre (de momento el único dato; se pueden añadir más campos más
+// adelante sin tocar lo ya guardado).
+async function refreshEstaciones() {
+  try {
+    const data = await apiPost('/estaciones', { action:'listPublic', token: LS.token() });
+    LS.setEstacionCache(data.estaciones || []);
+    setCloudState('ok');
+  } catch (e) {
+    setCloudState(e.isNetwork ? 'off' : 'err');
+  }
+  return LS.estacionCache();
+}
+// prefix: 'r' (repostaje) — ids: {prefix}Estacion, {prefix}NuevaEstacion
+function populateEstacionSelect(prefix, list) {
+  const sel = document.getElementById(prefix+'Estacion');
+  if (!sel) return;
+  const items = list || LS.estacionCache();
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— Selecciona estación —</option>' +
+    items.map(e => `<option value="${e.id}">${e.nombre}</option>`).join('') +
+    '<option value="__new__">+ Añadir estación nueva…</option>';
+  if (items.some(e => e.id === current)) sel.value = current;
+  onEstacionChange(prefix);
+}
+function onEstacionChange(prefix) {
+  const sel = document.getElementById(prefix+'Estacion');
+  const nuevoBox = document.getElementById(prefix+'NuevaEstacion');
+  if (!sel) return;
+  if (nuevoBox) nuevoBox.style.display = sel.value === '__new__' ? 'flex' : 'none';
+}
+async function crearEstacionInline(prefix) {
+  const nomEl = document.getElementById(prefix+'EstacionNombreNueva');
+  const nombre = nomEl.value.trim();
+  if (!nombre) { toast('Introduce el nombre de la estación nueva'); return; }
+  try {
+    const data = await apiPost('/estaciones', { action:'crear', token: LS.token(), payload:{ nombre } });
+    setCloudState('ok');
+    toast(`✓ Estación "${nombre}" creada`);
+    nomEl.value = '';
+    await refreshEstaciones();
+    populateEstacionSelect(prefix);
+    const sel = document.getElementById(prefix+'Estacion');
+    if (data.id) sel.value = data.id;
+    onEstacionChange(prefix);
+  } catch (e) {
+    toast(e.isNetwork ? '⚠ Sin conexión: no se ha podido crear la estación' : '⚠ '+e.message);
+  }
+}
+function cancelarEstacionNueva(prefix) {
+  const sel = document.getElementById(prefix+'Estacion');
+  if (sel) sel.value = '';
+  const nuevoBox = document.getElementById(prefix+'NuevaEstacion');
+  if (nuevoBox) nuevoBox.style.display = 'none';
+}
+
 // ── Cola de registros pendientes de sincronizar ──────
 async function syncRecordToCloud(rec) {
   if (!LS.token()) return; // sesión solo local (login sin conexión): no intentamos la nube
@@ -329,7 +461,17 @@ function go(id) {
   if(id==='hist')       { cambiarVistaHistorial('lista'); filtroHistorialRapido(); }
   if(id==='form')       { populateConductorSelect(); refreshDrivers().then(populateConductorSelect); populateIrradiadorSelect(); refreshIrradiadores().then(populateIrradiadorSelect); renderUrnaCards(); updateStepperStatus(); }
   if(id==='irradiadores') renderIrradiadoresScreen();
-  if(id==='conduccion')   { document.getElementById('vFecha').value=tod(new Date()); document.getElementById('rFecha').value=tod(new Date()); cambiarVistaConduccion('viaje'); }
+  if(id==='vehiculos')    renderVehiculosScreen();
+  if(id==='estaciones')   renderEstacionesScreen();
+  if(id==='conduccion')   {
+    document.getElementById('vFecha').value=tod(new Date());
+    document.getElementById('rFecha').value=tod(new Date());
+    populateVehiculoSelect('v'); populateVehiculoSelect('r');
+    populateEstacionSelect('r');
+    refreshVehiculos().then(()=>{ populateVehiculoSelect('v'); populateVehiculoSelect('r'); });
+    refreshEstaciones().then(()=>populateEstacionSelect('r'));
+    cambiarVistaConduccion('viaje');
+  }
   if(id==='sl')         { setLogo(0); startLogoRotation(); }
   else                  { stopLogoRotation(); }
 
@@ -339,6 +481,8 @@ function go(id) {
   document.getElementById('drawerAdminLbl').style.display=S.isAdmin?'block':'none';
   document.getElementById('drawerUsersLink').style.display=S.isAdmin?'block':'none';
   document.getElementById('drawerIrradiadoresLink').style.display=S.isAdmin?'block':'none';
+  document.getElementById('drawerVehiculosLink').style.display=S.isAdmin?'block':'none';
+  document.getElementById('drawerEstacionesLink').style.display=S.isAdmin?'block':'none';
   closeDrawer();
 }
 function nuevoRegistro() {
@@ -2024,6 +2168,190 @@ async function delIrradiador(id) {
   refreshIrradiadores().then(()=>populateIrradiadorSelect());
 }
 
+// ── GESTIÓN DE VEHÍCULOS (matrícula + número de obra) ──
+let editVehId=null;
+async function renderVehiculosScreen() {
+  if(!S.isAdmin){ go('menu'); toast('Solo un administrador puede ver esta pantalla'); return; }
+  const box=document.getElementById('vehList');
+  const note=document.getElementById('vehSyncNote');
+  let items=[], enNube=true;
+  try{
+    const data=await apiPost('/vehiculos',{action:'list',token:LS.token()});
+    items=data.vehiculos||[];
+    setCloudState('ok');
+  }catch(e){
+    enNube=false;
+    setCloudState(e.isNetwork?'off':'err');
+    items=LS.vehiculoCache().map(v=>({...v,activo:true}));
+  }
+  if(note) note.textContent=enNube?'':'⚠ Mostrando la última lista descargada (sin conexión con la nube).';
+  box.innerHTML=items.length===0
+    ?'<div style="font-size:13px;color:var(--txt3)">No hay vehículos dados de alta</div>'
+    :items.map(v=>{
+      if(editVehId===v.id) return filaVehEdicion(v);
+      return `
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--brd);font-size:13px;flex-wrap:wrap">
+        <span style="font-family:var(--fmono);font-size:11px;font-weight:700;background:rgba(76,110,245,.18);color:var(--blue-l);padding:2px 6px;border-radius:4px;flex-shrink:0">${v.matricula}</span>
+        <span style="flex:1;font-weight:600">Obra: ${v.numero_obra||'—'}${v.activo===false?' <span style="color:var(--txt3);font-weight:400">(inactivo)</span>':''}</span>
+        <button class="btn bo bs" style="padding:3px 8px;font-size:11px" onclick="editarVehInicio('${v.id}')">✏️ Editar</button>
+        <button class="btn br bs" style="padding:3px 8px;font-size:11px" onclick="delVehiculo('${v.id}')">Eliminar</button>
+      </div>`;
+    }).join('');
+}
+function filaVehEdicion(v) {
+  const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  return `
+  <div style="padding:10px;margin-top:8px;border:1px solid var(--brd3);border-radius:10px;background:rgba(76,110,245,.06);display:flex;flex-direction:column;gap:10px">
+    <div style="font-weight:700;font-family:var(--fh)">Editando vehículo</div>
+    <div class="fl"><label>Matrícula</label><input type="text" id="eu_veh_matricula" value="${esc(v.matricula)}" style="text-transform:uppercase"></div>
+    <div class="fl"><label>Número de obra</label><input type="text" id="eu_veh_obra" value="${esc(v.numero_obra)}"></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt2)">
+      <input type="checkbox" id="eu_veh_activo" ${v.activo!==false?'checked':''} style="width:auto">
+      Activo (aparece en el desplegable de Conducción)
+    </label>
+    <div style="display:flex;gap:8px">
+      <button class="btn bp bs" style="flex:1" onclick="editarVehGuardar('${v.id}')">Guardar cambios</button>
+      <button class="btn bo bs" onclick="editarVehCancelar()">Cancelar</button>
+    </div>
+  </div>`;
+}
+function editarVehInicio(id){ editVehId=id; renderVehiculosScreen(); }
+function editarVehCancelar(){ editVehId=null; renderVehiculosScreen(); }
+async function editarVehGuardar(id) {
+  const matricula=document.getElementById('eu_veh_matricula').value.trim();
+  const numeroObra=document.getElementById('eu_veh_obra').value.trim();
+  const activo=document.getElementById('eu_veh_activo').checked;
+  try{
+    await apiPost('/vehiculos',{action:'editar',token:LS.token(),payload:{id,matricula,numeroObra,activo}});
+    setCloudState('ok');
+    toast('✓ Vehículo actualizado');
+  }catch(e){
+    toast('⚠ '+e.message);
+  }
+  editVehId=null;
+  renderVehiculosScreen();
+  refreshVehiculos().then(()=>{populateVehiculoSelect('v');populateVehiculoSelect('r');});
+}
+async function addVehiculo() {
+  const matricula=document.getElementById('vehMatricula').value.trim();
+  const numeroObra=document.getElementById('vehObra').value.trim();
+  if(!matricula||!numeroObra){toast('Rellena la matrícula y el número de obra');return;}
+  try{
+    await apiPost('/vehiculos',{action:'crear',token:LS.token(),payload:{matricula,numeroObra}});
+    setCloudState('ok');
+    toast(`✓ Vehículo "${matricula.toUpperCase()}" creado`);
+  }catch(e){
+    toast('⚠ '+e.message); return;
+  }
+  ['vehMatricula','vehObra'].forEach(id=>{document.getElementById(id).value='';});
+  renderVehiculosScreen();
+  refreshVehiculos().then(()=>{populateVehiculoSelect('v');populateVehiculoSelect('r');});
+}
+async function delVehiculo(id) {
+  const ok=await confirmDialog('¿Eliminar este vehículo? No se puede deshacer.',
+    {title:'Eliminar vehículo',okText:'Eliminar',okClass:'br'});
+  if(!ok) return;
+  try{
+    await apiPost('/vehiculos',{action:'eliminar',token:LS.token(),payload:{id}});
+    setCloudState('ok');
+    toast('Vehículo eliminado');
+  }catch(e){
+    toast('⚠ '+e.message);
+  }
+  renderVehiculosScreen();
+  refreshVehiculos().then(()=>{populateVehiculoSelect('v');populateVehiculoSelect('r');});
+}
+
+// ── GESTIÓN DE ESTACIONES DE SERVICIO ──────────────────
+let editEstId=null;
+async function renderEstacionesScreen() {
+  if(!S.isAdmin){ go('menu'); toast('Solo un administrador puede ver esta pantalla'); return; }
+  const box=document.getElementById('estList');
+  const note=document.getElementById('estSyncNote');
+  let items=[], enNube=true;
+  try{
+    const data=await apiPost('/estaciones',{action:'list',token:LS.token()});
+    items=data.estaciones||[];
+    setCloudState('ok');
+  }catch(e){
+    enNube=false;
+    setCloudState(e.isNetwork?'off':'err');
+    items=LS.estacionCache().map(x=>({...x,activo:true}));
+  }
+  if(note) note.textContent=enNube?'':'⚠ Mostrando la última lista descargada (sin conexión con la nube).';
+  box.innerHTML=items.length===0
+    ?'<div style="font-size:13px;color:var(--txt3)">No hay estaciones dadas de alta</div>'
+    :items.map(x=>{
+      if(editEstId===x.id) return filaEstEdicion(x);
+      return `
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--brd);font-size:13px;flex-wrap:wrap">
+        <span style="flex:1;font-weight:600">${x.nombre}${x.activo===false?' <span style="color:var(--txt3);font-weight:400">(inactiva)</span>':''}</span>
+        <button class="btn bo bs" style="padding:3px 8px;font-size:11px" onclick="editarEstInicio('${x.id}')">✏️ Editar</button>
+        <button class="btn br bs" style="padding:3px 8px;font-size:11px" onclick="delEstacion('${x.id}')">Eliminar</button>
+      </div>`;
+    }).join('');
+}
+function filaEstEdicion(x) {
+  const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  return `
+  <div style="padding:10px;margin-top:8px;border:1px solid var(--brd3);border-radius:10px;background:rgba(76,110,245,.06);display:flex;flex-direction:column;gap:10px">
+    <div style="font-weight:700;font-family:var(--fh)">Editando estación</div>
+    <div class="fl"><label>Nombre</label><input type="text" id="eu_est_nombre" value="${esc(x.nombre)}"></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt2)">
+      <input type="checkbox" id="eu_est_activo" ${x.activo!==false?'checked':''} style="width:auto">
+      Activa (aparece en el desplegable de Conducción)
+    </label>
+    <div style="display:flex;gap:8px">
+      <button class="btn bp bs" style="flex:1" onclick="editarEstGuardar('${x.id}')">Guardar cambios</button>
+      <button class="btn bo bs" onclick="editarEstCancelar()">Cancelar</button>
+    </div>
+  </div>`;
+}
+function editarEstInicio(id){ editEstId=id; renderEstacionesScreen(); }
+function editarEstCancelar(){ editEstId=null; renderEstacionesScreen(); }
+async function editarEstGuardar(id) {
+  const nombre=document.getElementById('eu_est_nombre').value.trim();
+  const activo=document.getElementById('eu_est_activo').checked;
+  try{
+    await apiPost('/estaciones',{action:'editar',token:LS.token(),payload:{id,nombre,activo}});
+    setCloudState('ok');
+    toast('✓ Estación actualizada');
+  }catch(e){
+    toast('⚠ '+e.message);
+  }
+  editEstId=null;
+  renderEstacionesScreen();
+  refreshEstaciones().then(()=>populateEstacionSelect('r'));
+}
+async function addEstacion() {
+  const nombre=document.getElementById('estNombre').value.trim();
+  if(!nombre){toast('Introduce el nombre de la estación');return;}
+  try{
+    await apiPost('/estaciones',{action:'crear',token:LS.token(),payload:{nombre}});
+    setCloudState('ok');
+    toast(`✓ Estación "${nombre}" creada`);
+  }catch(e){
+    toast('⚠ '+e.message); return;
+  }
+  document.getElementById('estNombre').value='';
+  renderEstacionesScreen();
+  refreshEstaciones().then(()=>populateEstacionSelect('r'));
+}
+async function delEstacion(id) {
+  const ok=await confirmDialog('¿Eliminar esta estación? No se puede deshacer.',
+    {title:'Eliminar estación',okText:'Eliminar',okClass:'br'});
+  if(!ok) return;
+  try{
+    await apiPost('/estaciones',{action:'eliminar',token:LS.token(),payload:{id}});
+    setCloudState('ok');
+    toast('Estación eliminada');
+  }catch(e){
+    toast('⚠ '+e.message);
+  }
+  renderEstacionesScreen();
+  refreshEstaciones().then(()=>populateEstacionSelect('r'));
+}
+
 // ── CONDUCCIÓN (viajes del vehículo + repostajes) ──────
 const FUEL_LABELS={diesel_xtl:'Diesel (XTL)',diesel:'Diesel',gasolina:'Gasolina',adblue:'AdBlue'};
 function cambiarVistaConduccion(vista) {
@@ -2046,10 +2374,14 @@ function calcLitros() {
   el.value=(!isNaN(importe)&&!isNaN(precio)&&precio>0)?(importe/precio).toFixed(2):'';
 }
 async function guardarViaje() {
-  const matricula=document.getElementById('vMatricula').value.trim();
-  if(!matricula){toast('Introduce la matrícula del vehículo');return;}
+  const sel=document.getElementById('vMatricula');
+  const vehId=sel.value;
+  if(!vehId||vehId==='__new__'){toast('Selecciona un vehículo (o créalo primero)');return;}
+  const veh=LS.vehiculoCache().find(v=>v.id===vehId);
+  if(!veh){toast('Vehículo no válido, actualiza la lista');refreshVehiculos().then(()=>populateVehiculoSelect('v'));return;}
   const payload={
-    matricula,
+    matricula: veh.matricula,
+    vehiculoId: veh.id,
     fecha: document.getElementById('vFecha').value,
     kmInicial: document.getElementById('vKmIni').value,
     kmFinal: document.getElementById('vKmFin').value,
@@ -2059,7 +2391,9 @@ async function guardarViaje() {
     await apiPost('/conduccion',{action:'guardarViaje',token:LS.token(),payload});
     setCloudState('ok');
     toast('✓ Viaje guardado');
-    ['vMatricula','vKmIni','vKmFin','vKmRec'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('vMatricula').value='';
+    ['vKmIni','vKmFin','vKmRec'].forEach(id=>document.getElementById(id).value='');
+    const obraEl=document.getElementById('vObra'); if(obraEl) obraEl.value='';
     document.getElementById('vFecha').value=tod(new Date());
     renderViajesList();
   }catch(e){
@@ -2078,7 +2412,7 @@ async function renderViajesList() {
     box.innerHTML=viajes.slice(0,30).map(v=>{
       const puede=S.isAdmin||v.creado_por===S.user;
       return `<div class="ritem">
-        <div class="rdate">🚗 ${v.matricula} ${v.fecha?'— '+fmt(pd(v.fecha)):''} <span style="color:var(--txt3);font-weight:400">· ${v.creado_por||'—'}</span></div>
+        <div class="rdate">🚗 ${v.matricula}${v.vehiculos&&v.vehiculos.numero_obra?' · Obra '+v.vehiculos.numero_obra:''} ${v.fecha?'— '+fmt(pd(v.fecha)):''} <span style="color:var(--txt3);font-weight:400">· ${v.creado_por||'—'}</span></div>
         <div class="rdets">
           <span>Km inicial: <strong>${v.km_inicial??'—'}</strong></span>
           <span>Km final: <strong>${v.km_final??'—'}</strong></span>
@@ -2102,23 +2436,35 @@ async function eliminarViaje(id) {
 }
 
 async function guardarRepostaje() {
-  const matricula=document.getElementById('rMatricula').value.trim();
-  if(!matricula){toast('Introduce la matrícula del vehículo');return;}
+  const sel=document.getElementById('rMatricula');
+  const vehId=sel.value;
+  if(!vehId||vehId==='__new__'){toast('Selecciona un vehículo (o créalo primero)');return;}
+  const veh=LS.vehiculoCache().find(v=>v.id===vehId);
+  if(!veh){toast('Vehículo no válido, actualiza la lista');refreshVehiculos().then(()=>populateVehiculoSelect('r'));return;}
+  const estSel=document.getElementById('rEstacion');
+  const estId=estSel.value;
+  if(estId==='__new__'){toast('Crea la estación nueva o cancélala antes de guardar');return;}
+  const est=estId?LS.estacionCache().find(e=>e.id===estId):null;
   const payload={
-    matricula,
+    matricula: veh.matricula,
+    vehiculoId: veh.id,
     fecha: document.getElementById('rFecha').value,
     km: document.getElementById('rKm').value,
     importe: document.getElementById('rImporte').value,
     precioLitro: document.getElementById('rPrecio').value,
     tipoCombustible: document.getElementById('rTipo').value,
-    estacionServicio: document.getElementById('rEstacion').value.trim(),
+    estacionServicio: est?est.nombre:'',
+    estacionId: est?est.id:null,
   };
   setBtnLoading('rGuardarBtn', true, 'Guardando…');
   try{
     await apiPost('/conduccion',{action:'guardarRepostaje',token:LS.token(),payload});
     setCloudState('ok');
     toast('✓ Repostaje guardado');
-    ['rMatricula','rKm','rImporte','rPrecio','rLitros','rEstacion'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('rMatricula').value='';
+    document.getElementById('rEstacion').value='';
+    ['rKm','rImporte','rPrecio','rLitros'].forEach(id=>document.getElementById(id).value='');
+    const obraEl=document.getElementById('rObra'); if(obraEl) obraEl.value='';
     document.getElementById('rFecha').value=tod(new Date());
     renderRepostajesList();
   }catch(e){
@@ -2137,7 +2483,7 @@ async function renderRepostajesList() {
     box.innerHTML=rep.slice(0,30).map(r=>{
       const puede=S.isAdmin||r.creado_por===S.user;
       return `<div class="ritem">
-        <div class="rdate">⛽ ${r.matricula} ${r.fecha?'— '+fmt(pd(r.fecha)):''} <span style="color:var(--txt3);font-weight:400">· ${FUEL_LABELS[r.tipo_combustible]||'—'}</span></div>
+        <div class="rdate">⛽ ${r.matricula}${r.vehiculos&&r.vehiculos.numero_obra?' · Obra '+r.vehiculos.numero_obra:''} ${r.fecha?'— '+fmt(pd(r.fecha)):''} <span style="color:var(--txt3);font-weight:400">· ${FUEL_LABELS[r.tipo_combustible]||'—'}</span></div>
         <div class="rdets">
           <span>Km: <strong>${r.km??'—'}</strong></span>
           <span>Importe: <strong>${r.importe??'—'} €</strong></span>

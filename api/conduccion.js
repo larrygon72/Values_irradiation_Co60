@@ -37,12 +37,13 @@ export default async function handler(req, res) {
   try {
     // ── VIAJES ────────────────────────────────────────────
     if (action === "guardarViaje") {
-      const { matricula, fecha, kmInicial, kmFinal } = payload || {};
+      const { matricula, vehiculoId, fecha, kmInicial, kmFinal } = payload || {};
       if (!matricula) return res.status(400).json({ error: "Falta la matrícula" });
       const { data, error } = await supabase
         .from("vehiculo_viajes")
         .insert({
           matricula: matricula.trim().toUpperCase(),
+          vehiculo_id: vehiculoId || null,
           fecha: fecha || null,
           km_inicial: kmInicial !== "" && kmInicial != null ? parseFloat(kmInicial) : null,
           km_final: kmFinal !== "" && kmFinal != null ? parseFloat(kmFinal) : null,
@@ -56,7 +57,7 @@ export default async function handler(req, res) {
 
     if (action === "listarViajes") {
       const { desde, hasta } = payload || {};
-      let q = supabase.from("vehiculo_viajes").select("*").order("fecha", { ascending: false }).order("created_at", { ascending: false }).limit(500);
+      let q = supabase.from("vehiculo_viajes").select("*, vehiculos(numero_obra)").order("fecha", { ascending: false }).order("created_at", { ascending: false }).limit(500);
       if (desde) q = q.gte("fecha", desde);
       if (hasta) q = q.lte("fecha", hasta);
       const { data, error } = await q;
@@ -77,7 +78,7 @@ export default async function handler(req, res) {
 
     // ── REPOSTAJES ────────────────────────────────────────
     if (action === "guardarRepostaje") {
-      const { matricula, fecha, km, importe, precioLitro, tipoCombustible, estacionServicio } = payload || {};
+      const { matricula, vehiculoId, fecha, km, importe, precioLitro, tipoCombustible, estacionServicio, estacionId } = payload || {};
       if (!matricula) return res.status(400).json({ error: "Falta la matrícula" });
       if (tipoCombustible && !TIPOS_COMBUSTIBLE.includes(tipoCombustible)) {
         return res.status(400).json({ error: "Tipo de combustible no válido" });
@@ -86,12 +87,14 @@ export default async function handler(req, res) {
         .from("repostajes")
         .insert({
           matricula: matricula.trim().toUpperCase(),
+          vehiculo_id: vehiculoId || null,
           fecha: fecha || null,
           km: km !== "" && km != null ? parseFloat(km) : null,
           importe: importe !== "" && importe != null ? parseFloat(importe) : null,
           precio_litro: precioLitro !== "" && precioLitro != null ? parseFloat(precioLitro) : null,
           tipo_combustible: tipoCombustible || null,
           estacion_servicio: estacionServicio || null,
+          estacion_id: estacionId || null,
           creado_por: sesion.nick,
         })
         .select("id")
@@ -102,7 +105,7 @@ export default async function handler(req, res) {
 
     if (action === "listarRepostajes") {
       const { desde, hasta } = payload || {};
-      let q = supabase.from("repostajes").select("*").order("fecha", { ascending: false }).order("created_at", { ascending: false }).limit(500);
+      let q = supabase.from("repostajes").select("*, vehiculos(numero_obra), estaciones_servicio(nombre)").order("fecha", { ascending: false }).order("created_at", { ascending: false }).limit(500);
       if (desde) q = q.gte("fecha", desde);
       if (hasta) q = q.lte("fecha", hasta);
       const { data, error } = await q;

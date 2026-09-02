@@ -181,3 +181,64 @@ alter table repostajes add column litros numeric generated always as (
        then round((importe/precio_litro)::numeric,2) else null end
 ) stored;
 alter table repostajes enable row level security;
+
+-- ════════════════════════════════════════════════════════════
+-- AMPLIACIÓN — Gestión de vehículos disponibles (matrícula +
+-- número de obra). El campo "Matrícula" de Conducción pasa a ser
+-- un desplegable que se rellena desde esta tabla; si la matrícula
+-- buscada no existe todavía, cualquier usuario con sesión iniciada
+-- puede darla de alta indicando también el número de obra. Editar,
+-- desactivar o eliminar un vehículo ya existente es solo para
+-- administradores (pantalla "Vehículos").
+-- ════════════════════════════════════════════════════════════
+
+-- ── TABLA: vehiculos ─────────────────────────────────────────
+create table if not exists vehiculos (
+  id           uuid primary key default gen_random_uuid(),
+  matricula    text not null,
+  numero_obra  text not null default '',
+  activo       boolean not null default true,
+  creado_por   text,
+  created_at   timestamptz not null default now()
+);
+-- Matrícula única, sin distinguir mayúsculas/minúsculas
+create unique index if not exists vehiculos_matricula_lower_idx on vehiculos (lower(matricula));
+alter table vehiculos enable row level security;
+
+-- ── Enlace con viajes y repostajes ───────────────────────────
+-- Se mantiene la columna "matricula" de texto libre en ambas tablas
+-- por compatibilidad con registros antiguos y para que el historial
+-- siga mostrándose sin depender de un JOIN, pero además se guarda la
+-- referencia al vehículo elegido en el desplegable (vehiculo_id),
+-- que permite mostrar el número de obra junto a cada viaje/repostaje.
+alter table vehiculo_viajes add column if not exists vehiculo_id uuid references vehiculos(id) on delete set null;
+alter table repostajes add column if not exists vehiculo_id uuid references vehiculos(id) on delete set null;
+
+-- ════════════════════════════════════════════════════════════
+-- AMPLIACIÓN — Gestión de estaciones de servicio. El campo
+-- "Estación de servicio" de Repostaje pasa a ser un desplegable
+-- que se rellena desde esta tabla; si la estación buscada no
+-- existe todavía, cualquier usuario con sesión iniciada puede
+-- darla de alta (de momento solo con el nombre; se pueden añadir
+-- más campos más adelante sin romper lo ya guardado). Editar,
+-- desactivar o eliminar una estación ya existente es solo para
+-- administradores (pantalla "Estaciones").
+-- ════════════════════════════════════════════════════════════
+
+-- ── TABLA: estaciones_servicio ───────────────────────────────
+create table if not exists estaciones_servicio (
+  id           uuid primary key default gen_random_uuid(),
+  nombre       text not null,
+  activo       boolean not null default true,
+  creado_por   text,
+  created_at   timestamptz not null default now()
+);
+-- Nombre único, sin distinguir mayúsculas/minúsculas
+create unique index if not exists estaciones_servicio_nombre_lower_idx on estaciones_servicio (lower(nombre));
+alter table estaciones_servicio enable row level security;
+
+-- ── Enlace con repostajes ─────────────────────────────────────
+-- Se mantiene la columna "estacion_servicio" de texto libre por
+-- compatibilidad con registros antiguos; estacion_id es la nueva
+-- referencia a la estación elegida en el desplegable.
+alter table repostajes add column if not exists estacion_id uuid references estaciones_servicio(id) on delete set null;
