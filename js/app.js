@@ -1848,6 +1848,28 @@ async function exportHistXLSX() {
   if(result===null) return;
   showSaveDlg(filename,'xlsx',blob.size,'hist',result);
 }
+// ── Logo para la cabecera del PDF de Historial ──────────
+// jsPDF necesita la imagen ya cargada como dataURL (no basta con darle la
+// ruta), así que se precarga una sola vez y se reutiliza en cada export.
+let _logoInformeCache = null;
+function cargarLogoInforme() {
+  if (_logoInformeCache) return _logoInformeCache;
+  _logoInformeCache = new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        resolve({ dataURL: canvas.toDataURL('image/png'), w: img.naturalWidth, h: img.naturalHeight });
+      } catch (e) { resolve(null); } // p.ej. restricciones de lienzo en algunos navegadores
+    };
+    img.onerror = () => resolve(null); // sin conexión / imagen no disponible: el PDF se genera igualmente
+    img.src = 'img/logo_tie_mosquito.png';
+  });
+  return _logoInformeCache;
+}
 async function exportHistPDF() {
   const regs=S.histFiltered||[];
   if(!regs.length){toast('No hay registros para exportar');return;}
@@ -1855,9 +1877,20 @@ async function exportHistPDF() {
   const {header,rows}=buildHistRows(regs);
   const {jsPDF}=window.jspdf;
   const doc=new jsPDF({orientation:'landscape',unit:'pt'});
-  doc.setFontSize(14); doc.text('Values Irradiation WEB-210 — Historial',40,30);
-  doc.setFontSize(9);  doc.text(`Generado: ${new Date().toLocaleString()}`,40,45);
-  doc.autoTable({head:[header],body:rows,startY:55,styles:{fontSize:7,cellPadding:3},headStyles:{fillColor:[76,110,245]}});
+  const logo=await cargarLogoInforme();
+  let textX=40, tablaY=55;
+  if (logo) {
+    const logoW=64, logoH=logoW*(logo.h/logo.w), logoX=40, logoY=14;
+    doc.addImage(logo.dataURL,'PNG',logoX,logoY,logoW,logoH);
+    doc.setFontSize(6.5); doc.setTextColor(140);
+    doc.text(`by Heute schöne Tag · © ${new Date().getFullYear()}`, logoX, logoY+logoH+10);
+    doc.setTextColor(0);
+    textX=logoX+logoW+14;
+    tablaY=Math.max(tablaY, logoY+logoH+22);
+  }
+  doc.setFontSize(14); doc.text('Values Irradiation WEB-210 — Historial',textX,32);
+  doc.setFontSize(9);  doc.text(`Generado: ${new Date().toLocaleString()}`,textX,47);
+  doc.autoTable({head:[header],body:rows,startY:tablaY,styles:{fontSize:7,cellPadding:3},headStyles:{fillColor:[76,110,245]}});
   const blob=doc.output('blob');
   const filename=`historial_${dateStamp()}.pdf`;
   const result=await dlBlob(filename,blob);
