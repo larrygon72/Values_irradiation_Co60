@@ -213,6 +213,10 @@ alter table vehiculos enable row level security;
 -- que permite mostrar el número de obra junto a cada viaje/repostaje.
 alter table vehiculo_viajes add column if not exists vehiculo_id uuid references vehiculos(id) on delete set null;
 alter table repostajes add column if not exists vehiculo_id uuid references vehiculos(id) on delete set null;
+-- Aceleran la búsqueda del "último km conocido" de un vehículo (autorrelleno
+-- de Km inicial en Viaje y de la referencia de km en Repostaje).
+create index if not exists vehiculo_viajes_vehiculo_id_fecha_idx on vehiculo_viajes (vehiculo_id, fecha desc, created_at desc);
+create index if not exists repostajes_vehiculo_id_fecha_idx on repostajes (vehiculo_id, fecha desc, created_at desc);
 
 -- ════════════════════════════════════════════════════════════
 -- AMPLIACIÓN — Gestión de estaciones de servicio. El campo

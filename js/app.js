@@ -247,11 +247,74 @@ function onVehiculoChange(prefix) {
   if (sel.value === '__new__') {
     if (nuevoBox) nuevoBox.style.display = 'flex';
     if (obraEl) obraEl.value = '';
+    resetUltimoKm(prefix);
     return;
   }
   if (nuevoBox) nuevoBox.style.display = 'none';
   const v = LS.vehiculoCache().find(x => x.id === sel.value);
   if (obraEl) obraEl.value = v ? (v.numero_obra || '—') : '';
+  if (v) cargarUltimoKm(prefix, v.id);
+  else resetUltimoKm(prefix);
+}
+
+// ── Autorrelleno de kilometraje (último km conocido por vehículo) ──
+// Para no reintroducir datos ya guardados: al elegir un vehículo en Viaje,
+// "Km inicial" se rellena solo con el km final de su último viaje. En
+// Repostaje se muestra el km de su último repostaje como referencia, y al
+// teclear el km actual se calculan solos los km recorridos desde entonces.
+let _kmReqSeq = 0;
+async function cargarUltimoKm(prefix, vehiculoId) {
+  const reqId = ++_kmReqSeq;
+  try {
+    const data = await apiPost('/conduccion', { action:'ultimoKmVehiculo', token: LS.token(), payload:{ vehiculoId } });
+    if (reqId !== _kmReqSeq) return; // se seleccionó otro vehículo mientras tanto
+    if (prefix === 'v') aplicarKmIniAuto(data.ultimoKmViaje);
+    if (prefix === 'r') aplicarUltimoKmRepostaje(data.ultimoKmRepostaje);
+  } catch (e) {
+    if (reqId !== _kmReqSeq) return;
+    resetUltimoKm(prefix);
+  }
+}
+function resetUltimoKm(prefix) {
+  if (prefix === 'v') aplicarKmIniAuto(null);
+  if (prefix === 'r') aplicarUltimoKmRepostaje(null);
+}
+function aplicarKmIniAuto(km) {
+  const wrap = document.getElementById('vKmIniWrap');
+  const label = document.getElementById('vKmIniLabel');
+  const input = document.getElementById('vKmIni');
+  const badge = document.getElementById('vKmIniBadge');
+  if (!wrap || !input) return;
+  const val = (km!=null && km!=='' && !isNaN(km)) ? km : null;
+  if (val != null) {
+    wrap.classList.add('auto-fl');
+    if (label) label.textContent = '⚙ Km inicial';
+    input.value = val;
+    input.readOnly = true;
+    input.placeholder = '';
+    if (badge) badge.style.display = '';
+  } else {
+    wrap.classList.remove('auto-fl');
+    if (label) label.textContent = 'Km inicial';
+    input.value = '';
+    input.readOnly = false;
+    input.placeholder = '0';
+    if (badge) badge.style.display = 'none';
+  }
+  calcKmRecorridos();
+}
+function aplicarUltimoKmRepostaje(km) {
+  const el = document.getElementById('rUltimoKm');
+  if (!el) return;
+  el.value = (km!=null && km!=='' && !isNaN(km)) ? km : '';
+  calcKmDesdeRepostaje();
+}
+function calcKmDesdeRepostaje() {
+  const actual = parseFloat(document.getElementById('rKm').value);
+  const anterior = parseFloat(document.getElementById('rUltimoKm').value);
+  const el = document.getElementById('rKmRec');
+  if (!el) return;
+  el.value = (!isNaN(actual)&&!isNaN(anterior)&&actual>=anterior) ? (actual-anterior).toFixed(1) : '';
 }
 async function crearVehiculoInline(prefix) {
   const matEl = document.getElementById(prefix+'MatriculaNueva');
@@ -2392,7 +2455,8 @@ async function guardarViaje() {
     setCloudState('ok');
     toast('✓ Viaje guardado');
     document.getElementById('vMatricula').value='';
-    ['vKmIni','vKmFin','vKmRec'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('vKmFin').value='';
+    aplicarKmIniAuto(null);
     const obraEl=document.getElementById('vObra'); if(obraEl) obraEl.value='';
     document.getElementById('vFecha').value=tod(new Date());
     renderViajesList();
@@ -2464,6 +2528,7 @@ async function guardarRepostaje() {
     document.getElementById('rMatricula').value='';
     document.getElementById('rEstacion').value='';
     ['rKm','rImporte','rPrecio','rLitros'].forEach(id=>document.getElementById(id).value='');
+    aplicarUltimoKmRepostaje(null);
     const obraEl=document.getElementById('rObra'); if(obraEl) obraEl.value='';
     document.getElementById('rFecha').value=tod(new Date());
     renderRepostajesList();

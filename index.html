@@ -863,7 +863,9 @@
         </div>
         <div class="fl"><label>Fecha</label><input type="date" id="vFecha"></div>
         <div class="fr2">
-          <div class="fl"><label>Km inicial</label><input type="number" id="vKmIni" placeholder="0" min="0" oninput="calcKmRecorridos()"></div>
+          <div class="fl" id="vKmIniWrap"><label id="vKmIniLabel">Km inicial</label>
+            <div class="cfr"><input type="number" id="vKmIni" placeholder="0" min="0" oninput="calcKmRecorridos()"><span class="aut" id="vKmIniBadge" style="display:none">auto</span></div>
+          </div>
           <div class="fl"><label>Km final</label><input type="number" id="vKmFin" placeholder="0" min="0" oninput="calcKmRecorridos()"></div>
         </div>
         <div class="fl auto-fl"><label>⚙ Km recorridos</label>
@@ -885,6 +887,8 @@
           </select></div>
         <div class="fl auto-fl" id="rObraWrap"><label>⚙ Número de obra</label>
           <div class="cfr"><input type="text" id="rObra" readonly placeholder="—"><span class="aut">auto</span></div></div>
+        <div class="fl auto-fl" id="rUltimoKmWrap"><label>⚙ Último km de repostaje</label>
+          <div class="cfr"><input type="text" id="rUltimoKm" readonly placeholder="—"><span class="aut">auto</span></div></div>
         <div id="rNuevoVehiculo" style="display:none;padding:10px;border:1px solid var(--brd3);border-radius:10px;background:rgba(76,110,245,.06);flex-direction:column;gap:10px">
           <div style="font-weight:700;font-family:var(--fh)">Vehículo nuevo</div>
           <div class="fl"><label>Matrícula</label><input type="text" id="rMatriculaNueva" placeholder="Ej. 1234 ABC" style="text-transform:uppercase"></div>
@@ -896,8 +900,10 @@
         </div>
         <div class="fr2">
           <div class="fl"><label>Fecha</label><input type="date" id="rFecha"></div>
-          <div class="fl"><label>Km</label><input type="number" id="rKm" placeholder="0" min="0"></div>
+          <div class="fl"><label>Km actual</label><input type="number" id="rKm" placeholder="0" min="0" oninput="calcKmDesdeRepostaje()"></div>
         </div>
+        <div class="fl auto-fl" id="rKmRecWrap"><label>⚙ Km recorridos desde el repostaje anterior</label>
+          <div class="cfr"><input type="text" id="rKmRec" readonly placeholder="—"><span class="aut">auto</span></div></div>
         <div class="fl"><label>Tipo de combustible</label>
           <select id="rTipo">
             <option value="diesel_xtl">Diesel (XTL)</option>

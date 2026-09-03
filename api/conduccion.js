@@ -6,6 +6,9 @@
 // action:"guardarRepostaje"  -> inserta un repostaje
 // action:"listarRepostajes"  -> lista repostajes, opcionalmente por fecha
 // action:"eliminarRepostaje" -> borra un repostaje (propio, o cualquiera si admin)
+// action:"ultimoKmVehiculo"  -> último km final de viaje y último km de
+//                              repostaje conocidos para un vehículo, para
+//                              autorrellenar los formularios de Conducción
 
 import { getSupabaseAdmin } from "./_lib/supabaseAdmin.js";
 import { verificarToken } from "./_lib/auth.js";
@@ -122,6 +125,43 @@ export default async function handler(req, res) {
       const { error } = await supabase.from("repostajes").delete().eq("id", id);
       if (error) throw error;
       return res.status(200).json({ ok: true });
+    }
+
+    // ── ÚLTIMO KM CONOCIDO (autorrelleno) ──────────────────
+    // Para no tener que volver a teclear kilometrajes: al elegir un vehículo,
+    // se busca el km final de su último viaje (para precargar "Km inicial"
+    // del viaje de hoy) y el km de su último repostaje (para mostrarlo como
+    // referencia y calcular los km recorridos desde entonces).
+    if (action === "ultimoKmVehiculo") {
+      const { vehiculoId } = payload || {};
+      if (!vehiculoId) return res.status(400).json({ error: "Falta el vehículo" });
+
+      const { data: ultimoViaje, error: errV } = await supabase
+        .from("vehiculo_viajes")
+        .select("km_final")
+        .eq("vehiculo_id", vehiculoId)
+        .not("km_final", "is", null)
+        .order("fecha", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (errV) throw errV;
+
+      const { data: ultimoRepostaje, error: errR } = await supabase
+        .from("repostajes")
+        .select("km")
+        .eq("vehiculo_id", vehiculoId)
+        .not("km", "is", null)
+        .order("fecha", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (errR) throw errR;
+
+      return res.status(200).json({
+        ultimoKmViaje: ultimoViaje ? ultimoViaje.km_final : null,
+        ultimoKmRepostaje: ultimoRepostaje ? ultimoRepostaje.km : null,
+      });
     }
 
     return res.status(400).json({ error: "Acción no reconocida" });
