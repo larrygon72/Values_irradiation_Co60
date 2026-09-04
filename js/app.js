@@ -1878,16 +1878,21 @@ async function exportHistPDF() {
   const {jsPDF}=window.jspdf;
   const doc=new jsPDF({orientation:'landscape',unit:'pt'});
   const logo=await cargarLogoInforme();
-  let textX=40, tablaY=55;
-  if (logo) {
-    const logoW=64, logoH=logoW*(logo.h/logo.w), logoX=40, logoY=14;
-    doc.addImage(logo.dataURL,'PNG',logoX,logoY,logoW,logoH);
-    doc.setFontSize(6.5); doc.setTextColor(140);
-    doc.text(`by Heute schöne Tag · © ${new Date().getFullYear()}`, logoX, logoY+logoH+10);
-    doc.setTextColor(0);
-    textX=logoX+logoW+14;
-    tablaY=Math.max(tablaY, logoY+logoH+22);
-  }
+
+  // Cabecera: logo (si se ha podido cargar) + texto de crédito. El texto
+  // NO depende de que la imagen cargue —siempre se dibuja— y el hueco que
+  // deja el logo se reserva siempre igual (misma proporción que el propio
+  // logo, 3:2), para que el resto del informe no salte de sitio según haya
+  // o no haya conexión.
+  const logoX=40, logoY=14, logoW=64;
+  const logoH = logo ? logoW*(logo.h/logo.w) : logoW*(2/3);
+  if (logo) doc.addImage(logo.dataURL,'PNG',logoX,logoY,logoW,logoH);
+  doc.setFontSize(6.5); doc.setTextColor(140);
+  doc.text(`by Heute schöne Tag · © ${new Date().getFullYear()}`, logoX, logoY+logoH+10);
+  doc.setTextColor(0);
+
+  const textX=logoX+logoW+14;
+  const tablaY=Math.max(55, logoY+logoH+22);
   doc.setFontSize(14); doc.text('Values Irradiation WEB-210 — Historial',textX,32);
   doc.setFontSize(9);  doc.text(`Generado: ${new Date().toLocaleString()}`,textX,47);
   doc.autoTable({head:[header],body:rows,startY:tablaY,styles:{fontSize:7,cellPadding:3},headStyles:{fillColor:[76,110,245]}});

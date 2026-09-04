@@ -404,6 +404,14 @@ body.theme-light .fl input[type=time]::-webkit-calendar-picker-indicator{filter:
 .ldot.on{background:var(--blue-l);border-color:var(--blue-l);box-shadow:0 0 6px var(--blue-dim)}
 @media(min-width:600px){.login-logo-wrap{width:140px;height:140px}}
 
+/* ── BIENVENIDA (pantalla neutra de entrada) ── */
+#swelcome{align-items:center;justify-content:center;min-height:100vh;
+  background:var(--grad-bg);padding:24px 16px}
+.welcome-logo{display:block;width:150px;height:auto;margin:0 auto;object-fit:contain}
+.welcome-title{text-align:center;font-family:var(--fh);font-size:30px;font-weight:700;
+  letter-spacing:.005em;color:var(--txt)}
+@media(min-width:600px){.welcome-logo{width:180px}.welcome-title{font-size:34px}}
+
 /* ── DASHBOARD ── */
 .dash-hd{align-items:flex-start;padding-bottom:14px}
 .dash-greet{font-family:var(--fh);font-size:21px;font-weight:700;color:var(--txt)}
