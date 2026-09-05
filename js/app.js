@@ -535,10 +535,9 @@ function go(id) {
     refreshEstaciones().then(()=>populateEstacionSelect('r'));
     cambiarVistaConduccion('viaje');
   }
-  if(id==='sl')         { setLogo(0); startLogoRotation(); }
-  else                  { stopLogoRotation(); }
+  if(id==='sl')         { setLogo(0); startLogoRotation(); } else { stopLogoRotation(); }
 
-  document.getElementById('app').classList.toggle('authed', id!=='sl');
+  document.getElementById('app').classList.toggle('authed', id!=='sl' && id!=='welcome' && id!=='welcome2');
   document.querySelectorAll('[data-nav]').forEach(b=>b.classList.toggle('active', b.dataset.nav===id));
   document.getElementById('sidebarAdmin').style.display=S.isAdmin?'block':'none';
   document.getElementById('drawerAdminLbl').style.display=S.isAdmin?'block':'none';
@@ -633,7 +632,7 @@ function loginLocalFallback(name,pass) {
     LS.setToken(''); LS.setSession(null);
     S.user=u.name; S.isAdmin=u.role==='admin'; S.dose=LS.dose();
     toast('☁ Sin conexión: sesión solo local');
-    go('menu');
+    go('welcome2');
   } else {
     u.att=(u.att||0)+1; const rem=3-u.att;
     if(rem<=0){u.locked=true;LS.setU(users);showErr('Bloqueado. Demasiados intentos.');}
@@ -668,14 +667,14 @@ async function lRegister() {
     LS.setToken(''); LS.setSession(null);
     S.user=name; S.isAdmin=false; S.dose=LS.dose();
     toast('☁ Sin conexión: cuenta creada solo en este dispositivo');
-    go('menu');
+    go('welcome2');
   }
 }
 function onAuthSuccess(usuario, token) {
   LS.setToken(token); LS.setSession(usuario);
   S.user=usuario.nick; S.isAdmin=usuario.role==='admin'; S.dose=LS.dose();
   S.lastCheck=new Date().toISOString();
-  go('menu');
+  go('welcome2');
   flushPending();
   refreshDrivers().then(()=>populateConductorSelect());
   startNotifPolling();

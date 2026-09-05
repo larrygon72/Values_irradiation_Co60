@@ -405,7 +405,7 @@ body.theme-light .fl input[type=time]::-webkit-calendar-picker-indicator{filter:
 @media(min-width:600px){.login-logo-wrap{width:140px;height:140px}}
 
 /* ── BIENVENIDA (pantalla neutra de entrada) ── */
-#swelcome{align-items:center;justify-content:center;min-height:100vh;
+#swelcome, #swelcome2{align-items:center;justify-content:center;min-height:100vh;
   background:var(--grad-bg);padding:24px 16px}
 .welcome-logo{display:block;width:150px;height:auto;margin:0 auto;object-fit:contain}
 .welcome-title{text-align:center;font-family:var(--fh);font-size:30px;font-weight:700;
