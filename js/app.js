@@ -262,11 +262,16 @@ function onVehiculoChange(prefix) {
 // "Km inicial" se rellena solo con el km final de su último viaje. En
 // Repostaje se muestra el km de su último repostaje como referencia, y al
 // teclear el km actual se calculan solos los km recorridos desde entonces.
+// El "último km de repostaje" se busca SIEMPRE junto con el tipo de
+// combustible seleccionado: un mismo vehículo reposta Diesel y AdBlue a
+// kilometrajes muy distintos, así que no tiene sentido mezclarlos.
 let _kmReqSeq = 0;
 async function cargarUltimoKm(prefix, vehiculoId) {
   const reqId = ++_kmReqSeq;
+  const tipoEl = prefix === 'r' ? document.getElementById('rTipo') : null;
+  const tipoCombustible = tipoEl ? tipoEl.value : undefined;
   try {
-    const data = await apiPost('/conduccion', { action:'ultimoKmVehiculo', token: LS.token(), payload:{ vehiculoId } });
+    const data = await apiPost('/conduccion', { action:'ultimoKmVehiculo', token: LS.token(), payload:{ vehiculoId, tipoCombustible } });
     if (reqId !== _kmReqSeq) return; // se seleccionó otro vehículo mientras tanto
     if (prefix === 'v') aplicarKmIniAuto(data.ultimoKmViaje);
     if (prefix === 'r') aplicarUltimoKmRepostaje(data.ultimoKmRepostaje);
@@ -274,6 +279,14 @@ async function cargarUltimoKm(prefix, vehiculoId) {
     if (reqId !== _kmReqSeq) return;
     resetUltimoKm(prefix);
   }
+}
+// Al cambiar el tipo de combustible, "último km de repostaje" hay que
+// recalcularlo para el vehículo ya elegido (si lo hay).
+function onTipoCombustibleChange() {
+  const sel = document.getElementById('rMatricula');
+  if (!sel || !sel.value || sel.value === '__new__') { resetUltimoKm('r'); return; }
+  const v = LS.vehiculoCache().find(x => x.id === sel.value);
+  if (v) cargarUltimoKm('r', v.id); else resetUltimoKm('r');
 }
 function resetUltimoKm(prefix) {
   if (prefix === 'v') aplicarKmIniAuto(null);

@@ -7,8 +7,10 @@
 // action:"listarRepostajes"  -> lista repostajes, opcionalmente por fecha
 // action:"eliminarRepostaje" -> borra un repostaje (propio, o cualquiera si admin)
 // action:"ultimoKmVehiculo"  -> último km final de viaje y último km de
-//                              repostaje conocidos para un vehículo, para
-//                              autorrellenar los formularios de Conducción
+//                              repostaje conocidos para un vehículo (el de
+//                              repostaje, filtrado también por tipo de
+//                              combustible si se indica), para autorrellenar
+//                              los formularios de Conducción
 
 import { getSupabaseAdmin } from "./_lib/supabaseAdmin.js";
 import { verificarToken } from "./_lib/auth.js";
@@ -132,9 +134,15 @@ export default async function handler(req, res) {
     // se busca el km final de su último viaje (para precargar "Km inicial"
     // del viaje de hoy) y el km de su último repostaje (para mostrarlo como
     // referencia y calcular los km recorridos desde entonces).
+    //
+    // El km del último repostaje se filtra ADEMÁS por tipo de combustible
+    // cuando se indica: un mismo vehículo puede repostar Diesel y AdBlue en
+    // kilometrajes muy distintos (el AdBlue se añade mucho menos a menudo),
+    // así que mezclarlos daría una referencia sin sentido.
     if (action === "ultimoKmVehiculo") {
-      const { vehiculoId } = payload || {};
+      const { vehiculoId, tipoCombustible } = payload || {};
       if (!vehiculoId) return res.status(400).json({ error: "Falta el vehículo" });
+      const tipoValido = TIPOS_COMBUSTIBLE.includes(tipoCombustible) ? tipoCombustible : null;
 
       const { data: ultimoViaje, error: errV } = await supabase
         .from("vehiculo_viajes")
@@ -147,11 +155,13 @@ export default async function handler(req, res) {
         .maybeSingle();
       if (errV) throw errV;
 
-      const { data: ultimoRepostaje, error: errR } = await supabase
+      let qRepostaje = supabase
         .from("repostajes")
         .select("km")
         .eq("vehiculo_id", vehiculoId)
-        .not("km", "is", null)
+        .not("km", "is", null);
+      if (tipoValido) qRepostaje = qRepostaje.eq("tipo_combustible", tipoValido);
+      const { data: ultimoRepostaje, error: errR } = await qRepostaje
         .order("fecha", { ascending: false })
         .order("created_at", { ascending: false })
         .limit(1)
