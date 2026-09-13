@@ -80,6 +80,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20V10M10 20V4M17 20v-7"/></svg>
         <span>Resumen anual</span>
       </button>
+      <button class="sidebar-link" data-nav="informes" onclick="go('informes')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6M9 9h1"/></svg>
+        <span>Informes</span>
+      </button>
     </div>
     <div class="sidebar-group" id="sidebarAdmin" style="display:none">
       <div class="sidebar-group-lbl">Administración</div>
@@ -513,9 +517,11 @@
         <div class="cardh" style="background:var(--grad-btn)">Registro del operador</div>
         <div class="cardb">
           <div class="fr2">
-            <div class="fl"><label>H. inicio irradiación</label><input type="time" id="fHini"></div>
-            <div class="fl"><label>H. fin irradiación</label><input type="time" id="fHfin"></div>
+            <div class="fl"><label>H. inicio irradiación</label><input type="time" id="fHini" oninput="calcDuracionIrr()"></div>
+            <div class="fl"><label>H. fin irradiación</label><input type="time" id="fHfin" oninput="calcDuracionIrr()"></div>
           </div>
+          <div class="fl auto-fl"><label>⚙ Duración de la irradiación</label>
+            <div class="cfr"><input type="text" id="fDuracionIrr" readonly placeholder="—"><span class="aut">auto</span></div></div>
           <div class="fl"><label>Exposición (µSv)</label>
             <input type="number" id="fExpUsv" placeholder="Lectura del dosímetro en µSv" min="0" step="0.01"></div>
         </div>
@@ -644,6 +650,38 @@
 
     <div id="histChartWrap" style="display:none;background:var(--surf);border-radius:var(--rlg);padding:14px">
       <canvas id="histChart" height="220"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ INFORMES (informes personalizados) ══════════ -->
+<div class="sc" id="sinformes">
+  <div class="tb">
+    <button class="back" onclick="go('menu')">← Volver</button>
+    <h1>Informes</h1>
+  </div>
+  <div class="sa" style="display:flex;flex-direction:column;gap:16px">
+    <p class="thhint" style="margin:0">Elige un periodo, marca los campos que quieras que aparezcan y genera el informe en PDF o CSV.</p>
+    <div class="ssc">
+      <h3>Periodo</h3>
+      <div class="fr2">
+        <div class="fl"><label>Desde</label><input type="date" id="iDesde"></div>
+        <div class="fl"><label>Hasta</label><input type="date" id="iHasta"></div>
+      </div>
+      <button class="btn bp bw" onclick="buscarInformes()">Buscar</button>
+      <div class="lft" id="informesNote"></div>
+    </div>
+    <div class="ssc">
+      <h3>Campos a incluir</h3>
+      <div style="display:flex;gap:8px;margin-bottom:4px">
+        <button class="btn bo bs" style="flex:1" onclick="marcarTodosCampos(true)">Seleccionar todos</button>
+        <button class="btn bo bs" style="flex:1" onclick="marcarTodosCampos(false)">Ninguno</button>
+      </div>
+      <div id="camposInformeBox"></div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn bor bs" style="flex:1" onclick="exportInformeCSV()">⬇ CSV</button>
+      <button class="btn bor bs" style="flex:1" onclick="exportInformePDF()">⬇ PDF</button>
     </div>
   </div>
 </div>
@@ -993,6 +1031,7 @@
   <button class="drawer-link" data-nav="today" onclick="go('today')">Dosis hoy</button>
   <button class="drawer-link" data-nav="month" onclick="go('month')">Dosis mensual</button>
   <button class="drawer-link" data-nav="weekly" onclick="go('weekly')">Resumen anual</button>
+  <button class="drawer-link" data-nav="informes" onclick="go('informes')">Informes</button>
   <div class="drawer-grp-lbl" id="drawerAdminLbl" style="display:none">Administración</div>
   <button class="drawer-link" id="drawerUsersLink" data-nav="users" onclick="go('users')" style="display:none">Usuarios</button>
   <button class="drawer-link" id="drawerIrradiadoresLink" data-nav="irradiadores" onclick="go('irradiadores')" style="display:none">Irradiadores</button>

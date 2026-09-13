@@ -40,6 +40,7 @@ const S = {
   md:[0,0,0,0,0,0],
   exCtx:'form',
   histVista:'lista', histRaw:[], histFiltered:[],
+  informesRaw:[],
   histSort:{campo:'fecha_irradiacion',dir:'desc'},
   editingId:null, detRegistro:null,
   dashRegs:[],
@@ -535,6 +536,15 @@ function go(id) {
   if(id==='users')      renderUsersScreen();
   if(id==='records')    renderRecs();
   if(id==='hist')       { cambiarVistaHistorial('lista'); filtroHistorialRapido(); }
+  if(id==='informes')   {
+    renderCamposInforme();
+    const hoy=new Date(), hace30=new Date(); hace30.setDate(hoy.getDate()-30);
+    const iso=d=>d.toISOString().slice(0,10);
+    document.getElementById('iDesde').value=iso(hace30);
+    document.getElementById('iHasta').value=iso(hoy);
+    S.informesRaw=[];
+    document.getElementById('informesNote').textContent='';
+  }
   if(id==='form')       { populateConductorSelect(); refreshDrivers().then(populateConductorSelect); populateIrradiadorSelect(); refreshIrradiadores().then(populateIrradiadorSelect); renderUrnaCards(); updateStepperStatus(); }
   if(id==='irradiadores') renderIrradiadoresScreen();
   if(id==='vehiculos')    renderVehiculosScreen();
@@ -1152,7 +1162,7 @@ async function guardar() {
 }
 function limpiarForm() {
   ['fchIrr','semana','tasa','fTexp','fTexpReal','fResp','fRespCod','fHII','fHIL','fHVI','fHVL',
-   'fTi','fTf','fTm','fIrr','fExpUsv','fDos','fHini','fHfin','fObs']
+   'fTi','fTf','fTm','fIrr','fExpUsv','fDos','fHini','fHfin','fDuracionIrr','fObs']
     .forEach(id=>{const e=document.getElementById(id);if(e){e.value='';if(id==='fDos')e.readOnly=false;}});
   onConductorChange();
   const irrSel=document.getElementById('fIrrSel'); if(irrSel) irrSel.value='';
@@ -1176,7 +1186,7 @@ function updStagedUI() {
 }
 
 // ── EXPORT ────────────────────────────────────────────
-const EX_LABELS={form:'Formulario',month:'Dosis mensual',weekly:'Tabla anual',hist:'Historial'};
+const EX_LABELS={form:'Formulario',month:'Dosis mensual',weekly:'Tabla anual',hist:'Historial',informes:'Informes'};
 
 function openExDlg(ctx) {
   if(ctx==='form'&&!S.staged.length){toast('No hay registros para exportar');return;}
@@ -1505,6 +1515,17 @@ function minutosEntre(hIni, hFin) {
   if(mins<0) mins+=24*60; // por si cruza medianoche
   return mins;
 }
+// Campo calculado del paso "Irradiación": diferencia entre H. inicio y H.
+// fin de irradiación, en horas (con 2 decimales) y su conversión a minutos.
+function calcDuracionIrr() {
+  const el=document.getElementById('fDuracionIrr');
+  if(!el) return;
+  const hIni=document.getElementById('fHini').value;
+  const hFin=document.getElementById('fHfin').value;
+  if(!hIni||!hFin){ el.value=''; return; }
+  const mins=minutosEntre(hIni,hFin);
+  el.value=`${(mins/60).toFixed(2)} h (${mins} min)`;
+}
 function formatMinutos(mins) {
   const h=Math.floor(mins/60), m=Math.round(mins%60);
   return `${h}h ${m}min`;
@@ -1689,6 +1710,7 @@ function cargarRegistroEnFormulario(r) {
   document.getElementById('fDos').value=r.dosimetros??'';
   document.getElementById('fHini').value=r.h_inicio_irr||'';
   document.getElementById('fHfin').value=r.h_fin_irr||'';
+  calcDuracionIrr();
   document.getElementById('fObs').value=r.observaciones||'';
   S.urna1=r.urna1&&typeof r.urna1==='object'?{...r.urna1}:{n:'',date:'',lote:''};
   S.urna2=r.urna2&&typeof r.urna2==='object'?{...r.urna2}:{n:'',date:'',lote:''};
@@ -1860,13 +1882,14 @@ async function exportHistXLSX() {
   if(result===null) return;
   showSaveDlg(filename,'xlsx',blob.size,'hist',result);
 }
-// ── Logo para la cabecera del PDF de Historial ──────────
+// ── Logo para la cabecera de los PDF (Historial e Informes) ────
 // jsPDF necesita la imagen ya cargada como dataURL (no basta con darle la
-// ruta), así que se precarga una sola vez y se reutiliza en cada export.
-let _logoInformeCache = null;
-function cargarLogoInforme() {
-  if (_logoInformeCache) return _logoInformeCache;
-  _logoInformeCache = new Promise((resolve) => {
+// ruta), así que se precarga una sola vez POR IMAGEN y se reutiliza en cada
+// export (Historial y el generador de Informes usan logos distintos).
+const _logoInformeCache = new Map();
+function cargarLogoInforme(ruta) {
+  if (_logoInformeCache.has(ruta)) return _logoInformeCache.get(ruta);
+  const promesa = new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       try {
@@ -1878,9 +1901,29 @@ function cargarLogoInforme() {
       } catch (e) { resolve(null); } // p.ej. restricciones de lienzo en algunos navegadores
     };
     img.onerror = () => resolve(null); // sin conexión / imagen no disponible: el PDF se genera igualmente
-    img.src = 'img/logo_tie_mosquito.png';
+    img.src = ruta;
   });
-  return _logoInformeCache;
+  _logoInformeCache.set(ruta, promesa);
+  return promesa;
+}
+// Cabecera común de todos los PDF de la app: logo arriba a la izquierda +
+// texto de crédito debajo (SIEMPRE se dibuja, cargue o no la imagen), título
+// y fecha de generación a la derecha del logo. El hueco reservado para el
+// logo es siempre el mismo (misma proporción 3:2), para que el resto del
+// informe no salte de sitio según haya o no haya conexión. Devuelve dónde
+// puede empezar el contenido (tablaY) para que nada se solape.
+function dibujarCabeceraPDF(doc, logo, titulo) {
+  const logoX=40, logoY=14, logoW=64;
+  const logoH = logo ? logoW*(logo.h/logo.w) : logoW*(2/3);
+  if (logo) doc.addImage(logo.dataURL,'PNG',logoX,logoY,logoW,logoH);
+  doc.setFontSize(6.5); doc.setTextColor(140);
+  doc.text(`by Heute schöne Tag · © ${new Date().getFullYear()}`, logoX, logoY+logoH+10);
+  doc.setTextColor(0);
+  const textX=logoX+logoW+14;
+  const tablaY=Math.max(55, logoY+logoH+22);
+  doc.setFontSize(14); doc.text(titulo,textX,32);
+  doc.setFontSize(9);  doc.text(`Generado: ${new Date().toLocaleString()}`,textX,47);
+  return {textX, tablaY};
 }
 async function exportHistPDF() {
   const regs=S.histFiltered||[];
@@ -1889,30 +1932,131 @@ async function exportHistPDF() {
   const {header,rows}=buildHistRows(regs);
   const {jsPDF}=window.jspdf;
   const doc=new jsPDF({orientation:'landscape',unit:'pt'});
-  const logo=await cargarLogoInforme();
-
-  // Cabecera: logo (si se ha podido cargar) + texto de crédito. El texto
-  // NO depende de que la imagen cargue —siempre se dibuja— y el hueco que
-  // deja el logo se reserva siempre igual (misma proporción que el propio
-  // logo, 3:2), para que el resto del informe no salte de sitio según haya
-  // o no haya conexión.
-  const logoX=40, logoY=14, logoW=64;
-  const logoH = logo ? logoW*(logo.h/logo.w) : logoW*(2/3);
-  if (logo) doc.addImage(logo.dataURL,'PNG',logoX,logoY,logoW,logoH);
-  doc.setFontSize(6.5); doc.setTextColor(140);
-  doc.text(`by Heute schöne Tag · © ${new Date().getFullYear()}`, logoX, logoY+logoH+10);
-  doc.setTextColor(0);
-
-  const textX=logoX+logoW+14;
-  const tablaY=Math.max(55, logoY+logoH+22);
-  doc.setFontSize(14); doc.text('Values Irradiation WEB-210 — Historial',textX,32);
-  doc.setFontSize(9);  doc.text(`Generado: ${new Date().toLocaleString()}`,textX,47);
+  const logo=await cargarLogoInforme('img/logo_tie_mosquito.png');
+  const {tablaY}=dibujarCabeceraPDF(doc, logo, 'Values Irradiation WEB-210 — Historial');
   doc.autoTable({head:[header],body:rows,startY:tablaY,styles:{fontSize:7,cellPadding:3},headStyles:{fillColor:[76,110,245]}});
   const blob=doc.output('blob');
   const filename=`historial_${dateStamp()}.pdf`;
   const result=await dlBlob(filename,blob);
   if(result===null) return;
   showSaveDlg(filename,'pdf',blob.size,'hist',result);
+}
+
+// ── INFORMES (informes personalizados: elegir campos + exportar) ──
+// Formatea una urna ({n, date, lote}) como una sola celda legible.
+function fmtUrna(u) {
+  if(!u||typeof u!=='object') return '';
+  const partes=[u.n?`Nº ${u.n}`:'', u.date?fmt(pd(u.date)):'', u.lote?`Lote ${u.lote}`:''].filter(Boolean);
+  return partes.join(' · ');
+}
+// Catálogo de TODOS los campos disponibles en los formularios, agrupados
+// igual que la ficha de detalle del historial, para que el usuario elija
+// cuáles quiere ver en su informe.
+const CAMPOS_INFORME=[
+  {id:'fecha',        label:'Fecha irradiación',        grupo:'Identificación', get:r=>r.fecha_irradiacion?fmt(pd(r.fecha_irradiacion)):''},
+  {id:'semana',       label:'Semana ISO',                grupo:'Identificación', get:r=>r.semana_iso??''},
+  {id:'creadoPor',    label:'Guardado por',              grupo:'Identificación', get:r=>r.creado_por||''},
+  {id:'conductor',    label:'Conductor',                 grupo:'Transporte', get:r=>r.conductor_nombre||''},
+  {id:'conductorCod', label:'Código conductor',          grupo:'Transporte', get:r=>r.conductor_codigo||''},
+  {id:'hIdaIni',      label:'H. ida inicio',             grupo:'Transporte', get:r=>r.h_ida_inicio||''},
+  {id:'hIdaLle',      label:'H. ida llegada',            grupo:'Transporte', get:r=>r.h_ida_llegada||''},
+  {id:'hVtaIni',      label:'H. vuelta inicio',          grupo:'Transporte', get:r=>r.h_vuelta_inicio||''},
+  {id:'hVtaLle',      label:'H. vuelta llegada',         grupo:'Transporte', get:r=>r.h_vuelta_llegada||''},
+  {id:'tempIni',      label:'Temperatura inicial (°C)',  grupo:'Temperatura', get:r=>r.temp_inicial??''},
+  {id:'tempFin',      label:'Temperatura final (°C)',    grupo:'Temperatura', get:r=>r.temp_final??''},
+  {id:'tempMedia',    label:'Temperatura media (°C)',    grupo:'Temperatura', get:r=>r.temp_media??''},
+  {id:'irradiador',   label:'Irradiador',                grupo:'Irradiación', get:r=>r.irradiador_nombre||r.irradiador||''},
+  {id:'irradiadorCod',label:'Código irradiador',         grupo:'Irradiación', get:r=>r.irradiador_codigo||''},
+  {id:'tasa',         label:'Tasa (Gy/s)',               grupo:'Irradiación', get:r=>r.tasa?parseFloat(r.tasa).toFixed(8):''},
+  {id:'texp',         label:'Tiempo exposición teórico (s)', grupo:'Irradiación', get:r=>r.tiempo_exposicion??''},
+  {id:'texpReal',     label:'Tiempo exposición real (s)',    grupo:'Irradiación', get:r=>r.tiempo_exposicion_real??''},
+  {id:'hIniIrr',      label:'H. inicio irradiación',     grupo:'Irradiación', get:r=>r.h_inicio_irr||''},
+  {id:'hFinIrr',      label:'H. fin irradiación',        grupo:'Irradiación', get:r=>r.h_fin_irr||''},
+  {id:'duracionIrr',  label:'Duración irradiación (h / min)', grupo:'Irradiación', get:r=>{
+      if(!r.h_inicio_irr||!r.h_fin_irr) return '';
+      const mins=minutosEntre(r.h_inicio_irr,r.h_fin_irr);
+      return `${(mins/60).toFixed(2)} h (${mins} min)`;
+    }},
+  {id:'expUsv',       label:'Exposición operador (µSv)', grupo:'Irradiación', get:r=>r.exposicion_usv??''},
+  {id:'dosimetros',   label:'Nº dosímetros',             grupo:'Irradiación', get:r=>r.dosimetros??''},
+  {id:'nUrnas',       label:'Nº urnas',                  grupo:'Urnas', get:r=>r.n_urnas??''},
+  {id:'urna1',        label:'Urna 1 (nº · fecha · lote)',grupo:'Urnas', get:r=>fmtUrna(r.urna1)},
+  {id:'urna2',        label:'Urna 2 (nº · fecha · lote)',grupo:'Urnas', get:r=>fmtUrna(r.urna2)},
+  {id:'urna3',        label:'Urna 3 (nº · fecha · lote)',grupo:'Urnas', get:r=>fmtUrna(r.urna3)},
+  {id:'obs',          label:'Observaciones',             grupo:'Observaciones', get:r=>r.observaciones||''},
+];
+function renderCamposInforme() {
+  const box=document.getElementById('camposInformeBox');
+  if(!box) return;
+  const grupos=[...new Set(CAMPOS_INFORME.map(c=>c.grupo))];
+  box.innerHTML=grupos.map(g=>`
+    <div style="margin-bottom:10px">
+      <div style="font-size:12px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px">${g}</div>
+      ${CAMPOS_INFORME.filter(c=>c.grupo===g).map(c=>`
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0">
+          <input type="checkbox" class="campoInformeChk" value="${c.id}" checked style="width:auto">
+          ${c.label}
+        </label>`).join('')}
+    </div>`).join('');
+}
+function marcarTodosCampos(marcar) {
+  document.querySelectorAll('.campoInformeChk').forEach(chk=>{chk.checked=marcar;});
+}
+function camposInformeSeleccionados() {
+  const ids=[...document.querySelectorAll('.campoInformeChk:checked')].map(chk=>chk.value);
+  return CAMPOS_INFORME.filter(c=>ids.includes(c.id));
+}
+async function buscarInformes() {
+  const desde=document.getElementById('iDesde').value;
+  const hasta=document.getElementById('iHasta').value;
+  const note=document.getElementById('informesNote');
+  S.informesRaw=[];
+  note.textContent='Buscando…';
+  if(!LS.token()){
+    note.textContent='Inicia sesión con conexión a internet para generar informes.';
+    return;
+  }
+  try{
+    const data=await apiPost('/registros',{action:'listar',token:LS.token(),payload:{desde,hasta}});
+    setCloudState('ok');
+    S.informesRaw=data.registros||[];
+    note.textContent=`${S.informesRaw.length} registro(s) encontrado(s)`;
+  }catch(e){
+    setCloudState(e.isNetwork?'off':'err');
+    note.textContent='No se ha podido consultar (sin conexión o error del servidor).';
+  }
+}
+async function exportInformeCSV() {
+  const regs=S.informesRaw||[];
+  if(!regs.length){toast('Busca primero un periodo con registros');return;}
+  const campos=camposInformeSeleccionados();
+  if(!campos.length){toast('Selecciona al menos un campo para el informe');return;}
+  const header=campos.map(c=>c.label);
+  const rows=regs.map(r=>campos.map(c=>c.get(r)));
+  const content=[header,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  const filename=`informe_${dateStamp()}.csv`;
+  const result=await dlFile(filename,content,'text/csv;charset=utf-8;');
+  if(result===null) return;
+  showSaveDlg(filename,'csv',new Blob(['\uFEFF'+content]).size,'informes',result);
+}
+async function exportInformePDF() {
+  const regs=S.informesRaw||[];
+  if(!regs.length){toast('Busca primero un periodo con registros');return;}
+  const campos=camposInformeSeleccionados();
+  if(!campos.length){toast('Selecciona al menos un campo para el informe');return;}
+  if(!window.jspdf){toast('⚠ No se pudo cargar la librería de PDF (revisa tu conexión a internet)');return;}
+  const header=campos.map(c=>c.label);
+  const rows=regs.map(r=>campos.map(c=>c.get(r)));
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({orientation:'landscape',unit:'pt'});
+  const logo=await cargarLogoInforme('img/mosquito_logo_team.png');
+  const {tablaY}=dibujarCabeceraPDF(doc, logo, 'Values Irradiation WEB-210 — Informe');
+  doc.autoTable({head:[header],body:rows,startY:tablaY,styles:{fontSize:7,cellPadding:3},headStyles:{fillColor:[76,110,245]}});
+  const blob=doc.output('blob');
+  const filename=`informe_${dateStamp()}.pdf`;
+  const result=await dlBlob(filename,blob);
+  if(result===null) return;
+  showSaveDlg(filename,'pdf',blob.size,'informes',result);
 }
 
 // ── TODAY ─────────────────────────────────────────────
