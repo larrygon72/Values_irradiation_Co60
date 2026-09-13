@@ -544,6 +544,7 @@ function go(id) {
     document.getElementById('iHasta').value=iso(hoy);
     S.informesRaw=[];
     document.getElementById('informesNote').textContent='';
+    ocultarVistaPreviaInforme();
   }
   if(id==='form')       { populateConductorSelect(); refreshDrivers().then(populateConductorSelect); populateIrradiadorSelect(); refreshIrradiadores().then(populateIrradiadorSelect); renderUrnaCards(); updateStepperStatus(); }
   if(id==='irradiadores') renderIrradiadoresScreen();
@@ -1994,17 +1995,66 @@ function renderCamposInforme() {
       <div style="font-size:12px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px">${g}</div>
       ${CAMPOS_INFORME.filter(c=>c.grupo===g).map(c=>`
         <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0">
-          <input type="checkbox" class="campoInformeChk" value="${c.id}" checked style="width:auto">
+          <input type="checkbox" class="campoInformeChk" value="${c.id}" checked onchange="actualizarResumenCampos()" style="width:auto">
           ${c.label}
         </label>`).join('')}
     </div>`).join('');
+  actualizarResumenCampos();
 }
 function marcarTodosCampos(marcar) {
   document.querySelectorAll('.campoInformeChk').forEach(chk=>{chk.checked=marcar;});
+  actualizarResumenCampos();
 }
 function camposInformeSeleccionados() {
   const ids=[...document.querySelectorAll('.campoInformeChk:checked')].map(chk=>chk.value);
   return CAMPOS_INFORME.filter(c=>ids.includes(c.id));
+}
+// ── Selector de campos: ventana emergente para no saturar la pantalla ──
+function abrirSelectorCampos() {
+  document.getElementById('camposOv').classList.add('on');
+}
+function cerrarSelectorCampos() {
+  document.getElementById('camposOv').classList.remove('on');
+  actualizarResumenCampos();
+  if((S.informesRaw||[]).length) renderVistaPreviaInforme();
+}
+function actualizarResumenCampos() {
+  const el=document.getElementById('camposResumen');
+  if(!el) return;
+  const total=CAMPOS_INFORME.length;
+  const marcados=camposInformeSeleccionados().length;
+  el.textContent=`(${marcados} de ${total})`;
+}
+// ── Vista previa: se ve antes de poder exportar o imprimir ──
+const VISTA_PREVIA_LIMITE=50;
+function renderVistaPreviaInforme() {
+  const wrap=document.getElementById('vistaPreviaWrap');
+  const exportWrap=document.getElementById('informesExportWrap');
+  const tabla=document.getElementById('vistaPreviaTabla');
+  const nota=document.getElementById('vistaPreviaNota');
+  const regs=S.informesRaw||[];
+  if(!regs.length){ ocultarVistaPreviaInforme(); return; }
+  const campos=camposInformeSeleccionados();
+  wrap.style.display='';
+  if(!campos.length){
+    tabla.innerHTML='';
+    nota.textContent='Selecciona al menos un campo para ver la vista previa.';
+    if(exportWrap) exportWrap.style.display='none';
+    return;
+  }
+  const filas=regs.slice(0,VISTA_PREVIA_LIMITE);
+  tabla.innerHTML=`<thead><tr>${campos.map(c=>`<th>${c.label}</th>`).join('')}</tr></thead>`+
+    `<tbody>${filas.map(r=>`<tr>${campos.map(c=>`<td>${c.get(r)??''}</td>`).join('')}</tr>`).join('')}</tbody>`;
+  nota.textContent = regs.length>VISTA_PREVIA_LIMITE
+    ? `Mostrando los primeros ${VISTA_PREVIA_LIMITE} de ${regs.length} registros (el informe exportado incluye todos).`
+    : `${regs.length} registro(s)`;
+  if(exportWrap) exportWrap.style.display='flex';
+}
+function ocultarVistaPreviaInforme() {
+  const wrap=document.getElementById('vistaPreviaWrap');
+  const exportWrap=document.getElementById('informesExportWrap');
+  if(wrap) wrap.style.display='none';
+  if(exportWrap) exportWrap.style.display='none';
 }
 async function buscarInformes() {
   const desde=document.getElementById('iDesde').value;
@@ -2012,6 +2062,7 @@ async function buscarInformes() {
   const note=document.getElementById('informesNote');
   S.informesRaw=[];
   note.textContent='Buscando…';
+  ocultarVistaPreviaInforme();
   if(!LS.token()){
     note.textContent='Inicia sesión con conexión a internet para generar informes.';
     return;
@@ -2021,6 +2072,7 @@ async function buscarInformes() {
     setCloudState('ok');
     S.informesRaw=data.registros||[];
     note.textContent=`${S.informesRaw.length} registro(s) encontrado(s)`;
+    if(S.informesRaw.length) renderVistaPreviaInforme();
   }catch(e){
     setCloudState(e.isNetwork?'off':'err');
     note.textContent='No se ha podido consultar (sin conexión o error del servidor).';

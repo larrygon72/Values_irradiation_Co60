@@ -661,7 +661,13 @@
     <h1>Informes</h1>
   </div>
   <div class="sa" style="display:flex;flex-direction:column;gap:16px">
-    <p class="thhint" style="margin:0">Elige un periodo, marca los campos que quieras que aparezcan y genera el informe en PDF o CSV.</p>
+    <p class="thhint" style="margin:0">Elige los campos, el periodo, revisa la vista previa y genera el informe en PDF o CSV.</p>
+
+    <div class="ssc">
+      <h3>Campos a incluir</h3>
+      <button class="btn bo bw" onclick="abrirSelectorCampos()">🔧 Elegir campos <span id="camposResumen" style="color:var(--txt3);font-weight:400"></span></button>
+    </div>
+
     <div class="ssc">
       <h3>Periodo</h3>
       <div class="fr2">
@@ -671,17 +677,37 @@
       <button class="btn bp bw" onclick="buscarInformes()">Buscar</button>
       <div class="lft" id="informesNote"></div>
     </div>
-    <div class="ssc">
-      <h3>Campos a incluir</h3>
-      <div style="display:flex;gap:8px;margin-bottom:4px">
-        <button class="btn bo bs" style="flex:1" onclick="marcarTodosCampos(true)">Seleccionar todos</button>
-        <button class="btn bo bs" style="flex:1" onclick="marcarTodosCampos(false)">Ninguno</button>
+
+    <div class="ssc" id="vistaPreviaWrap" style="display:none">
+      <h3>Vista previa</h3>
+      <div style="overflow-x:auto">
+        <table class="dtbl" id="vistaPreviaTabla"></table>
       </div>
-      <div id="camposInformeBox"></div>
+      <div class="lft" id="vistaPreviaNota" style="margin-top:6px"></div>
     </div>
-    <div style="display:flex;gap:8px">
+
+    <div id="informesExportWrap" style="display:none;gap:8px">
       <button class="btn bor bs" style="flex:1" onclick="exportInformeCSV()">⬇ CSV</button>
       <button class="btn bor bs" style="flex:1" onclick="exportInformePDF()">⬇ PDF</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ SELECTOR DE CAMPOS (Informes) ══════════ -->
+<div class="ov" id="camposOv">
+  <div class="modal" style="max-width:480px">
+    <div class="mhd">
+      <div>
+        <h3 style="font-family:var(--fh);font-size:17px;font-weight:700;color:#fff">Campos a incluir</h3>
+        <div style="font-size:12px;color:rgba(255,255,255,.8)">Marca lo que quieras ver en el informe</div>
+      </div>
+      <button onclick="cerrarSelectorCampos()" aria-label="Cerrar selector de campos" style="color:#fff;font-size:18px;padding:4px">✕</button>
+    </div>
+    <div class="mbdy" id="camposInformeBox"></div>
+    <div class="mft" style="flex-wrap:wrap;gap:8px">
+      <button class="btn bo bs" onclick="marcarTodosCampos(true)">Seleccionar todos</button>
+      <button class="btn bo bs" onclick="marcarTodosCampos(false)">Ninguno</button>
+      <button class="btn bp bs" style="flex:1" onclick="cerrarSelectorCampos()">Listo</button>
     </div>
   </div>
 </div>
