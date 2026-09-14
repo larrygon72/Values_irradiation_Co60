@@ -24,13 +24,19 @@
 // action:"listar"        -> lista de fichajes por rango de fechas (para
 //                           Informes). Un usuario normal solo ve los
 //                           suyos; un admin puede ver los de cualquiera.
-// action:"editar"        -> corrige manualmente un fichaje. Solo admin.
+// action:"corregir"      -> corrige (o crea, si no existía) el fichaje de
+//                           una fecha concreta — entrada y/o salida. No
+//                           siempre se puede fichar justo al entrar o
+//                           salir, así que cualquiera puede corregir los
+//                           SUYOS; un admin puede corregir los de otro
+//                           indicando "usuarioNick".
 // action:"eliminar"      -> borra un fichaje. Solo admin.
 
 import { getSupabaseAdmin } from "./_lib/supabaseAdmin.js";
 import { verificarToken } from "./_lib/auth.js";
 
 const MADRID_TZ = "Europe/Madrid";
+const HORA_VALIDA = /^([01]\d|2[0-3]):[0-5]\d$/; // "HH:MM"
 
 function horaAhoraMadrid() {
   return new Intl.DateTimeFormat("es-ES", {
@@ -174,31 +180,55 @@ export default async function handler(req, res) {
       return res.status(200).json({ fichajes: data });
     }
 
-    // A partir de aquí, todas las acciones son solo para administradores.
-    if (sesion.role !== "admin") {
-      return res.status(403).json({ error: "No tienes permiso para gestionar fichajes." });
-    }
+    // ── CORREGIR (por fecha) ───────────────────────────────
+    // No siempre se puede fichar justo al entrar o al salir, así que
+    // cualquier usuario puede corregir SUS PROPIOS fichajes (entrada y/o
+    // salida) eligiendo el día — incluye días sin fichaje todavía, que
+    // se crean directamente. Un admin puede corregir los de cualquiera
+    // indicando "usuarioNick".
+    if (action === "corregir") {
+      const { fecha, horaEntrada, horaSalida, usuarioNick } = payload || {};
+      if (!fecha) return res.status(400).json({ error: "Falta la fecha" });
+      if ((horaEntrada && !HORA_VALIDA.test(horaEntrada)) || (horaSalida && !HORA_VALIDA.test(horaSalida))) {
+        return res.status(400).json({ error: "La hora debe tener formato HH:MM" });
+      }
+      const nickDestino = sesion.role === "admin" && usuarioNick ? usuarioNick : sesion.nick;
 
-    // ── EDITAR (corrección manual) ────────────────────────
-    if (action === "editar") {
-      const { id, horaEntrada, horaSalida } = payload || {};
-      if (!id) return res.status(400).json({ error: "Falta el identificador" });
       const cambios = { updated_at: new Date().toISOString() };
       if (horaEntrada !== undefined) cambios.hora_entrada = horaEntrada || null;
       if (horaSalida !== undefined) {
         cambios.hora_salida = horaSalida || null;
         if (horaSalida) {
-          const { data: fila } = await supabase.from("fichajes").select("usuario_nick").eq("id", id).maybeSingle();
           const { data: usuario } = await supabase
-            .from("usuarios").select("horario_salida").ilike("nick", fila?.usuario_nick || "").maybeSingle();
+            .from("usuarios").select("horario_salida").ilike("nick", nickDestino).maybeSingle();
           cambios.horario_salida_esperado = usuario?.horario_salida || "13:57";
         } else {
           cambios.horario_salida_esperado = null;
         }
       }
-      const { error } = await supabase.from("fichajes").update(cambios).eq("id", id);
-      if (error) throw error;
-      return res.status(200).json({ ok: true });
+
+      const { data: existente, error: errE } = await supabase
+        .from("fichajes").select("id").ilike("usuario_nick", nickDestino).eq("fecha", fecha).maybeSingle();
+      if (errE) throw errE;
+
+      let fichaje;
+      if (existente) {
+        const { data, error } = await supabase.from("fichajes").update(cambios).eq("id", existente.id).select("*").single();
+        if (error) throw error;
+        fichaje = data;
+      } else {
+        const { data, error } = await supabase.from("fichajes")
+          .insert({ usuario_nick: nickDestino, fecha, ...cambios })
+          .select("*").single();
+        if (error) throw error;
+        fichaje = data;
+      }
+      return res.status(200).json({ ok: true, fichaje });
+    }
+
+    // A partir de aquí, todas las acciones son solo para administradores.
+    if (sesion.role !== "admin") {
+      return res.status(403).json({ error: "No tienes permiso para gestionar fichajes." });
     }
 
     // ── ELIMINAR ──────────────────────────────────────────

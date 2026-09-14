@@ -1057,6 +1057,17 @@
       <h3>Historial reciente (este mes)</h3>
       <div id="fichajeHistorial"></div>
     </div>
+    <div class="ssc">
+      <h3>Corregir un fichaje</h3>
+      <p class="thhint" style="margin:0 0 8px">No siempre se puede fichar justo al entrar o al salir. Elige el día y corrige la hora que haga falta.</p>
+      <div class="fl"><label>Fecha</label><input type="date" id="fichajeCorregirFecha" onchange="cargarFichajeParaCorregir()"></div>
+      <div class="fr2">
+        <div class="fl"><label>Hora entrada</label><input type="time" id="fichajeCorregirEntrada"></div>
+        <div class="fl"><label>Hora salida</label><input type="time" id="fichajeCorregirSalida"></div>
+      </div>
+      <button class="btn bp bw" onclick="guardarCorreccionFichaje()">Guardar corrección</button>
+      <div class="lft" id="fichajeCorregirNota" style="margin-top:6px"></div>
+    </div>
   </div>
 </div>
 

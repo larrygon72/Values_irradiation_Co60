@@ -269,6 +269,9 @@ alter table usuarios add column if not exists horario_salida  text not null defa
 -- usuario en el momento exacto de fichar la salida (no su horario
 -- actual), para que si un admin cambia el horario más adelante no se
 -- reescriba el histórico ya fichado.
+--
+-- horas_de_mas PUEDE SER NEGATIVO: si el usuario sale antes de su horario,
+-- se resta del total de horas de más acumuladas (no se queda en 0).
 create table if not exists fichajes (
   id                      uuid primary key default gen_random_uuid(),
   usuario_nick            text not null,
@@ -278,7 +281,7 @@ create table if not exists fichajes (
   horario_salida_esperado text,
   horas_de_mas numeric generated always as (
     case when hora_salida is not null and horario_salida_esperado is not null
-      then greatest(0, extract(epoch from (hora_salida::time - horario_salida_esperado::time)) / 3600.0)
+      then extract(epoch from (hora_salida::time - horario_salida_esperado::time)) / 3600.0
       else null end
   ) stored,
   created_at timestamptz not null default now(),
@@ -288,3 +291,14 @@ create table if not exists fichajes (
 create unique index if not exists fichajes_usuario_fecha_idx on fichajes (lower(usuario_nick), fecha);
 create index if not exists fichajes_fecha_idx on fichajes (fecha desc);
 alter table fichajes enable row level security;
+
+-- Si ya habías ejecutado una versión anterior de este esquema, la columna
+-- generada existente tenía un greatest(0, ...) que impedía valores
+-- negativos. Esto la vuelve a crear sin ese límite (es seguro re-ejecutar
+-- este bloque; si la tabla se acaba de crear arriba, no hace nada distinto).
+alter table fichajes drop column if exists horas_de_mas;
+alter table fichajes add column horas_de_mas numeric generated always as (
+  case when hora_salida is not null and horario_salida_esperado is not null
+    then extract(epoch from (hora_salida::time - horario_salida_esperado::time)) / 3600.0
+    else null end
+) stored;

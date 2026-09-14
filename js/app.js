@@ -561,7 +561,11 @@ function go(id) {
     refreshEstaciones().then(()=>populateEstacionSelect('r'));
     cambiarVistaConduccion('viaje');
   }
-  if(id==='fichaje')      { cargarFichajeHoy(); cargarResumenMesFichaje(); }
+  if(id==='fichaje')      {
+    cargarFichajeHoy(); cargarResumenMesFichaje();
+    document.getElementById('fichajeCorregirFecha').value=tod(new Date());
+    cargarFichajeParaCorregir();
+  }
   if(id==='sl')         { setLogo(0); startLogoRotation(); } else { stopLogoRotation(); }
 
   document.getElementById('app').classList.toggle('authed', id!=='sl' && id!=='welcome' && id!=='welcome2');
@@ -2875,6 +2879,14 @@ function formatHorasMin(horas) {
   const mins=Math.round(h*60);
   return `${h.toFixed(2)} h (${mins} min)`;
 }
+// Las horas de más pueden ser negativas (el usuario salió antes de su
+// horario, y eso resta del acumulado) — se marcan en rojo para que se note
+// a simple vista que van en contra, no a favor.
+function colorHorasDeMas(horas) {
+  const h=parseFloat(horas);
+  if(isNaN(h)||h===0) return 'var(--txt3)';
+  return h<0 ? 'var(--red-l)' : 'var(--teal-l)';
+}
 function renderFichajeHoy(data) {
   const cont=document.getElementById('fichajeEstadoContenido');
   const notaHorario=document.getElementById('fichajeHorarioNota');
@@ -2898,7 +2910,7 @@ function renderFichajeHoy(data) {
     cont.innerHTML=`
       <div style="text-align:center;padding:6px 0 2px">
         <div style="font-size:14px;color:var(--txt2)">Entrada: <strong>${f.hora_entrada}</strong> · Salida: <strong>${f.hora_salida}</strong></div>
-        <div style="font-size:13px;color:var(--txt3);margin-top:4px">Horas de más hoy: <strong>${formatHorasMin(f.horas_de_mas)}</strong></div>
+        <div style="font-size:13px;color:var(--txt3);margin-top:4px">Horas de más hoy: <strong style="color:${colorHorasDeMas(f.horas_de_mas)}">${formatHorasMin(f.horas_de_mas)}</strong></div>
         <div class="lft" style="margin-top:10px">Ya has fichado hoy. Vuelve mañana.</div>
       </div>`;
   }
@@ -2954,7 +2966,7 @@ function renderFichajeHistorial(fichajes) {
       <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--brd);font-size:13px;flex-wrap:wrap">
         <span style="flex:1;font-weight:600">${f.fecha?fmt(pd(f.fecha)):'—'}</span>
         <span style="color:var(--txt2)">${f.hora_entrada||'—'} → ${f.hora_salida||'—'}</span>
-        <span style="font-weight:700;color:${horas>0?'var(--teal-l)':'var(--txt3)'}">${!isNaN(horas)?horas.toFixed(2)+' h':'—'}</span>
+        <span style="font-weight:700;color:${colorHorasDeMas(horas)}">${!isNaN(horas)?horas.toFixed(2)+' h':'—'}</span>
       </div>`;
     }).join('');
 }
@@ -2965,11 +2977,63 @@ async function cargarResumenMesFichaje() {
     const data=await apiPost('/fichajes',{action:'resumenMes',token:LS.token()});
     setCloudState('ok');
     const total=data.totalHorasDeMas||0;
-    if(totalEl) totalEl.innerHTML=`${total.toFixed(2)} <span class="kpi-unit">h</span>`;
+    if(totalEl){
+      totalEl.innerHTML=`${total.toFixed(2)} <span class="kpi-unit">h</span>`;
+      totalEl.style.color=colorHorasDeMas(total);
+    }
     renderFichajeHistorial(data.fichajes||[]);
   }catch(e){
     setCloudState(e.isNetwork?'off':'err');
     if(totalEl) totalEl.textContent='—';
+  }
+}
+// ── Corregir un fichaje por fecha ───────────────────────
+// No siempre se puede fichar justo al entrar o salir; esto deja elegir un
+// día (de hoy o de cualquier fecha pasada) y corregir entrada y/o salida,
+// creando el fichaje de ese día si todavía no existía.
+async function cargarFichajeParaCorregir() {
+  const fecha=document.getElementById('fichajeCorregirFecha').value;
+  const nota=document.getElementById('fichajeCorregirNota');
+  const inEntrada=document.getElementById('fichajeCorregirEntrada');
+  const inSalida=document.getElementById('fichajeCorregirSalida');
+  inEntrada.value=''; inSalida.value='';
+  if(!nota) return;
+  if(!fecha){ nota.textContent=''; return; }
+  if(!LS.token()){ nota.textContent='Necesitas conexión a internet para corregir un fichaje.'; return; }
+  nota.textContent='Cargando…';
+  try{
+    const data=await apiPost('/fichajes',{action:'listar',token:LS.token(),payload:{desde:fecha,hasta:fecha}});
+    setCloudState('ok');
+    const f=(data.fichajes||[])[0];
+    if(f){
+      inEntrada.value=f.hora_entrada||'';
+      inSalida.value=f.hora_salida||'';
+      nota.textContent='Fichaje de ese día cargado. Corrígelo y guarda.';
+    }else{
+      nota.textContent='Ese día no tiene fichaje todavía — puedes crearlo.';
+    }
+  }catch(e){
+    setCloudState(e.isNetwork?'off':'err');
+    nota.textContent='No se ha podido consultar ese día (sin conexión o error del servidor).';
+  }
+}
+async function guardarCorreccionFichaje() {
+  const fecha=document.getElementById('fichajeCorregirFecha').value;
+  const nota=document.getElementById('fichajeCorregirNota');
+  if(!fecha){ toast('Elige primero una fecha'); return; }
+  if(!LS.token()){ toast('Necesitas conexión a internet para corregir un fichaje'); return; }
+  const horaEntrada=document.getElementById('fichajeCorregirEntrada').value;
+  const horaSalida=document.getElementById('fichajeCorregirSalida').value;
+  try{
+    await apiPost('/fichajes',{action:'corregir',token:LS.token(),payload:{fecha,horaEntrada,horaSalida}});
+    setCloudState('ok');
+    toast('✓ Fichaje corregido');
+    if(nota) nota.textContent='Guardado.';
+    // Por si la fecha corregida es hoy o cae en el mes en curso.
+    cargarFichajeHoy();
+    cargarResumenMesFichaje();
+  }catch(e){
+    toast(e.isNetwork?'⚠ Sin conexión: no se ha podido guardar la corrección':'⚠ '+e.message);
   }
 }
 
