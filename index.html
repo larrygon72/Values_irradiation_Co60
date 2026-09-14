@@ -65,6 +65,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 17h14M5 17a2 2 0 100 4 2 2 0 000-4zM19 17a2 2 0 100 4 2 2 0 000-4zM5 17l1.5-6h11L19 17M6.5 11l1-3h9l1 3"/></svg>
         <span>Conducción</span>
       </button>
+      <button class="sidebar-link" data-nav="fichaje" onclick="go('fichaje')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+        <span>Fichaje</span>
+      </button>
     </div>
     <div class="sidebar-group">
       <div class="sidebar-group-lbl">Análisis</div>
@@ -664,6 +668,14 @@
     <p class="thhint" style="margin:0">Elige los campos, el periodo, revisa la vista previa y genera el informe en PDF o CSV.</p>
 
     <div class="ssc">
+      <h3>Tipo de informe</h3>
+      <select id="informeTipo" onchange="cambiarTipoInforme()">
+        <option value="registros">Registros de irradiación</option>
+        <option value="fichajes">Fichajes (control horario)</option>
+      </select>
+    </div>
+
+    <div class="ssc">
       <h3>Campos a incluir</h3>
       <button class="btn bo bw" onclick="abrirSelectorCampos()">🔧 Elegir campos <span id="camposResumen" style="color:var(--txt3);font-weight:400"></span></button>
     </div>
@@ -841,6 +853,10 @@
         <input type="password" id="npass" placeholder="Contraseña"></div>
       <div class="fl"><label>Rol</label>
         <select id="nrole"><option value="user">Usuario</option><option value="admin">Admin</option></select></div>
+      <div class="fr2">
+        <div class="fl"><label>Horario entrada</label><input type="time" id="nHorarioEntrada" value="07:00"></div>
+        <div class="fl"><label>Horario salida</label><input type="time" id="nHorarioSalida" value="13:57"></div>
+      </div>
       <button class="btn bp bw" onclick="addUsr()">Añadir usuario</button>
       <hr class="xdiv">
       <div id="usrList"></div>
@@ -1020,6 +1036,30 @@
   </div>
 </div>
 
+<!-- ══════════ FICHAJE (control horario: entrada/salida diaria) ══════════ -->
+<div class="sc" id="sfichaje">
+  <div class="tb">
+    <button class="back" onclick="go('menu')">← Volver</button>
+    <h1>Fichaje</h1>
+  </div>
+  <div class="sa" style="display:flex;flex-direction:column;gap:16px">
+    <div class="ssc">
+      <div class="lft" id="fichajeHorarioNota" style="margin-bottom:6px"></div>
+      <div id="fichajeEstadoContenido">Cargando…</div>
+    </div>
+    <div class="kpi-grid">
+      <div class="kpi-card" style="grid-column:1/-1">
+        <div class="kpi-lbl">Horas de más este mes</div>
+        <div class="kpi-val" id="fichajeTotalMes">—</div>
+      </div>
+    </div>
+    <div class="ssc">
+      <h3>Historial reciente (este mes)</h3>
+      <div id="fichajeHistorial"></div>
+    </div>
+  </div>
+</div>
+
 </div>
 
 <!-- ══════════ BOTTOM NAV (móvil) ══════════ -->
@@ -1053,6 +1093,7 @@
   <button class="drawer-link" data-nav="records" onclick="go('records')">Registros</button>
   <button class="drawer-link" data-nav="multidosis" onclick="go('multidosis')">Multi-Dosis</button>
   <button class="drawer-link" data-nav="conduccion" onclick="go('conduccion')">Conducción</button>
+  <button class="drawer-link" data-nav="fichaje" onclick="go('fichaje')">Fichaje</button>
   <div class="drawer-grp-lbl">Análisis</div>
   <button class="drawer-link" data-nav="today" onclick="go('today')">Dosis hoy</button>
   <button class="drawer-link" data-nav="month" onclick="go('month')">Dosis mensual</button>

@@ -40,7 +40,7 @@ const S = {
   md:[0,0,0,0,0,0],
   exCtx:'form',
   histVista:'lista', histRaw:[], histFiltered:[],
-  informesRaw:[],
+  informesRaw:[], informesTipo:'registros',
   histSort:{campo:'fecha_irradiacion',dir:'desc'},
   editingId:null, detRegistro:null,
   dashRegs:[],
@@ -537,6 +537,8 @@ function go(id) {
   if(id==='records')    renderRecs();
   if(id==='hist')       { cambiarVistaHistorial('lista'); filtroHistorialRapido(); }
   if(id==='informes')   {
+    S.informesTipo='registros';
+    const tipoSel=document.getElementById('informeTipo'); if(tipoSel) tipoSel.value='registros';
     renderCamposInforme();
     const hoy=new Date(), hace30=new Date(); hace30.setDate(hoy.getDate()-30);
     const iso=d=>d.toISOString().slice(0,10);
@@ -559,6 +561,7 @@ function go(id) {
     refreshEstaciones().then(()=>populateEstacionSelect('r'));
     cambiarVistaConduccion('viaje');
   }
+  if(id==='fichaje')      { cargarFichajeHoy(); cargarResumenMesFichaje(); }
   if(id==='sl')         { setLogo(0); startLogoRotation(); } else { stopLogoRotation(); }
 
   document.getElementById('app').classList.toggle('authed', id!=='sl' && id!=='welcome' && id!=='welcome2');
@@ -1986,14 +1989,37 @@ const CAMPOS_INFORME=[
   {id:'urna3',        label:'Urna 3 (nº · fecha · lote)',grupo:'Urnas', get:r=>fmtUrna(r.urna3)},
   {id:'obs',          label:'Observaciones',             grupo:'Observaciones', get:r=>r.observaciones||''},
 ];
+// Campos disponibles cuando el informe es de Fichajes (control horario) en
+// vez de Registros de irradiación — son entidades distintas, así que cada
+// una tiene su propio catálogo de campos.
+const CAMPOS_INFORME_FICHAJES=[
+  {id:'fecha',           label:'Fecha',                        grupo:'Fichaje', get:r=>r.fecha?fmt(pd(r.fecha)):''},
+  {id:'usuario',         label:'Usuario',                      grupo:'Fichaje', get:r=>r.usuario_nick||''},
+  {id:'horaEntrada',     label:'Hora entrada',                 grupo:'Fichaje', get:r=>r.hora_entrada||''},
+  {id:'horaSalida',      label:'Hora salida',                  grupo:'Fichaje', get:r=>r.hora_salida||''},
+  {id:'horarioEsperado', label:'Horario de salida esperado',   grupo:'Fichaje', get:r=>r.horario_salida_esperado||''},
+  {id:'horasDeMas',      label:'Horas de más',                 grupo:'Fichaje', get:r=>r.horas_de_mas!=null?parseFloat(r.horas_de_mas).toFixed(2):''},
+];
+// Catálogo de campos activo según el tipo de informe elegido.
+function camposInformeCatalogo() {
+  return S.informesTipo==='fichajes' ? CAMPOS_INFORME_FICHAJES : CAMPOS_INFORME;
+}
+function cambiarTipoInforme() {
+  S.informesTipo=document.getElementById('informeTipo').value;
+  S.informesRaw=[];
+  document.getElementById('informesNote').textContent='';
+  ocultarVistaPreviaInforme();
+  renderCamposInforme();
+}
 function renderCamposInforme() {
   const box=document.getElementById('camposInformeBox');
   if(!box) return;
-  const grupos=[...new Set(CAMPOS_INFORME.map(c=>c.grupo))];
+  const catalogo=camposInformeCatalogo();
+  const grupos=[...new Set(catalogo.map(c=>c.grupo))];
   box.innerHTML=grupos.map(g=>`
     <div style="margin-bottom:10px">
       <div style="font-size:12px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px">${g}</div>
-      ${CAMPOS_INFORME.filter(c=>c.grupo===g).map(c=>`
+      ${catalogo.filter(c=>c.grupo===g).map(c=>`
         <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0">
           <input type="checkbox" class="campoInformeChk" value="${c.id}" checked onchange="actualizarResumenCampos()" style="width:auto">
           ${c.label}
@@ -2007,7 +2033,7 @@ function marcarTodosCampos(marcar) {
 }
 function camposInformeSeleccionados() {
   const ids=[...document.querySelectorAll('.campoInformeChk:checked')].map(chk=>chk.value);
-  return CAMPOS_INFORME.filter(c=>ids.includes(c.id));
+  return camposInformeCatalogo().filter(c=>ids.includes(c.id));
 }
 // ── Selector de campos: ventana emergente para no saturar la pantalla ──
 function abrirSelectorCampos() {
@@ -2068,9 +2094,16 @@ async function buscarInformes() {
     return;
   }
   try{
-    const data=await apiPost('/registros',{action:'listar',token:LS.token(),payload:{desde,hasta}});
+    let items;
+    if(S.informesTipo==='fichajes'){
+      const data=await apiPost('/fichajes',{action:'listar',token:LS.token(),payload:{desde,hasta}});
+      items=data.fichajes||[];
+    }else{
+      const data=await apiPost('/registros',{action:'listar',token:LS.token(),payload:{desde,hasta}});
+      items=data.registros||[];
+    }
     setCloudState('ok');
-    S.informesRaw=data.registros||[];
+    S.informesRaw=items;
     note.textContent=`${S.informesRaw.length} registro(s) encontrado(s)`;
     if(S.informesRaw.length) renderVistaPreviaInforme();
   }catch(e){
@@ -2086,7 +2119,7 @@ async function exportInformeCSV() {
   const header=campos.map(c=>c.label);
   const rows=regs.map(r=>campos.map(c=>c.get(r)));
   const content=[header,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\r\n');
-  const filename=`informe_${dateStamp()}.csv`;
+  const filename=`informe_${S.informesTipo==='fichajes'?'fichajes':'registros'}_${dateStamp()}.csv`;
   const result=await dlFile(filename,content,'text/csv;charset=utf-8;');
   if(result===null) return;
   showSaveDlg(filename,'csv',new Blob(['\uFEFF'+content]).size,'informes',result);
@@ -2102,10 +2135,11 @@ async function exportInformePDF() {
   const {jsPDF}=window.jspdf;
   const doc=new jsPDF({orientation:'landscape',unit:'pt'});
   const logo=await cargarLogoInforme('img/mosquito_logo_team.png');
-  const {tablaY}=dibujarCabeceraPDF(doc, logo, 'Values Irradiation WEB-210 — Informe');
+  const titulo=S.informesTipo==='fichajes' ? 'Values Irradiation WEB-210 — Informe de fichajes' : 'Values Irradiation WEB-210 — Informe';
+  const {tablaY}=dibujarCabeceraPDF(doc, logo, titulo);
   doc.autoTable({head:[header],body:rows,startY:tablaY,styles:{fontSize:7,cellPadding:3},headStyles:{fillColor:[76,110,245]}});
   const blob=doc.output('blob');
-  const filename=`informe_${dateStamp()}.pdf`;
+  const filename=`informe_${S.informesTipo==='fichajes'?'fichajes':'registros'}_${dateStamp()}.pdf`;
   const result=await dlBlob(filename,blob);
   if(result===null) return;
   showSaveDlg(filename,'pdf',blob.size,'informes',result);
@@ -2220,9 +2254,11 @@ async function addUsr() {
   const ap2=document.getElementById('nap2').value.trim();
   const pass=document.getElementById('npass').value;
   const role=document.getElementById('nrole').value;
+  const horarioEntrada=document.getElementById('nHorarioEntrada').value||'07:00';
+  const horarioSalida=document.getElementById('nHorarioSalida').value||'13:57';
   if(!nick||!pass){toast('Rellena usuario y contraseña');return;}
   try{
-    await apiPost('/usuarios',{action:'crear',token:LS.token(),payload:{nick,pass,nombre,apellido1:ap1,apellido2:ap2,role}});
+    await apiPost('/usuarios',{action:'crear',token:LS.token(),payload:{nick,pass,nombre,apellido1:ap1,apellido2:ap2,role,horarioEntrada,horarioSalida}});
     setCloudState('ok');
     toast(`✓ Usuario "${nick}" creado`);
   }catch(e){
@@ -2230,11 +2266,13 @@ async function addUsr() {
     setCloudState('off');
     const users=LS.users();
     if(users.find(u=>u.name.toLowerCase()===nick.toLowerCase())){toast('El usuario ya existe');return;}
-    users.push({name:nick,pass,role,att:0,locked:false,nombre,apellido1:ap1,apellido2:ap2});
+    users.push({name:nick,pass,role,att:0,locked:false,nombre,apellido1:ap1,apellido2:ap2,horarioEntrada,horarioSalida});
     LS.setU(users);
     toast(`✓ Usuario "${nick}" creado (local, sin conexión)`);
   }
   ['nusr','nnombre','nap1','nap2','npass'].forEach(id=>{document.getElementById(id).value='';});
+  document.getElementById('nHorarioEntrada').value='07:00';
+  document.getElementById('nHorarioSalida').value='13:57';
   renderUsrs();
   refreshDrivers().then(()=>populateConductorSelect());
 }
@@ -2248,7 +2286,8 @@ async function renderUsrs() {
     users=(data.usuarios||[]).map(u=>({
       name:u.nick, role:u.role, locked:u.locked,
       nombre:u.nombre||'', apellido1:u.apellido1||'', apellido2:u.apellido2||'',
-      codigo:u.codigo||codigoConductor(u.nombre,u.apellido1,u.apellido2)
+      codigo:u.codigo||codigoConductor(u.nombre,u.apellido1,u.apellido2),
+      horarioEntrada:u.horario_entrada||'07:00', horarioSalida:u.horario_salida||'13:57'
     }));
     setCloudState('ok');
   }catch(e){
@@ -2257,7 +2296,8 @@ async function renderUsrs() {
     users=LS.users().map(u=>({
       name:u.name, role:u.role, locked:u.locked,
       nombre:u.nombre||'', apellido1:u.apellido1||'', apellido2:u.apellido2||'',
-      codigo:codigoConductor(u.nombre||u.name,u.apellido1||'',u.apellido2||'')
+      codigo:codigoConductor(u.nombre||u.name,u.apellido1||'',u.apellido2||''),
+      horarioEntrada:u.horarioEntrada||'07:00', horarioSalida:u.horarioSalida||'13:57'
     }));
   }
   if(note) note.textContent = enNube ? '' : '⚠ Mostrando usuarios de este dispositivo (sin conexión con la nube).';
@@ -2275,6 +2315,7 @@ async function renderUsrs() {
       <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--brd);font-size:13px;flex-wrap:wrap">
         <span style="font-family:var(--fh);font-size:11px;font-weight:700;background:rgba(76,110,245,.18);color:var(--blue-l);padding:2px 6px;border-radius:4px;flex-shrink:0">${u.codigo}</span>
         <span style="flex:1;font-weight:600">${u.name}${nombreCompleto?` <span style="color:var(--txt3);font-weight:400">— ${nombreCompleto}</span>`:''}</span>
+        <span style="color:var(--txt3);font-size:11px">⏰ ${u.horarioEntrada||'07:00'}–${u.horarioSalida||'13:57'}</span>
         <span style="color:var(--txt3)">${u.role}</span>
         <button class="btn bo bs" style="padding:3px 8px;font-size:11px" onclick="editarUsrInicio('${nickSeguro}')">✏️ Editar</button>
         ${u.locked
@@ -2304,6 +2345,10 @@ function filaUsrEdicion(u, nickSeguro) {
         <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
       </select></div>
     ${puedeEditarRol?'':'<div class="lft" style="text-align:left">Solo "Admin" puede cambiar su propio rol.</div>'}
+    <div class="fr2">
+      <div class="fl"><label>Horario entrada</label><input type="time" id="eu_horarioEntrada" value="${esc(u.horarioEntrada||'07:00')}"></div>
+      <div class="fl"><label>Horario salida</label><input type="time" id="eu_horarioSalida" value="${esc(u.horarioSalida||'13:57')}"></div>
+    </div>
     <div class="fl"><label>Nueva contraseña (opcional)</label><input type="password" id="eu_pass" placeholder="Déjalo en blanco para no cambiarla"></div>
     <div style="display:flex;gap:8px">
       <button class="btn bp bs" style="flex:1" onclick="editarUsrGuardar('${nickSeguro}')">Guardar cambios</button>
@@ -2320,8 +2365,10 @@ async function editarUsrGuardar(nick) {
   const roleSel=document.getElementById('eu_role');
   const role=roleSel.disabled?undefined:roleSel.value;
   const nuevaPass=document.getElementById('eu_pass').value;
+  const horarioEntrada=document.getElementById('eu_horarioEntrada').value;
+  const horarioSalida=document.getElementById('eu_horarioSalida').value;
   try{
-    await apiPost('/usuarios',{action:'editar',token:LS.token(),payload:{nick,nombre,apellido1:ap1,apellido2:ap2,role,nuevaPass:nuevaPass||undefined}});
+    await apiPost('/usuarios',{action:'editar',token:LS.token(),payload:{nick,nombre,apellido1:ap1,apellido2:ap2,role,nuevaPass:nuevaPass||undefined,horarioEntrada,horarioSalida}});
     setCloudState('ok');
     toast('✓ Usuario actualizado');
   }catch(e){
@@ -2333,6 +2380,7 @@ async function editarUsrGuardar(nick) {
       u.nombre=nombre; u.apellido1=ap1; u.apellido2=ap2;
       if(role!==undefined) u.role=role;
       if(nuevaPass) u.pass=nuevaPass;
+      u.horarioEntrada=horarioEntrada; u.horarioSalida=horarioSalida;
       LS.setU(users);
       toast('✓ Usuario actualizado (local, sin conexión)');
     }
@@ -2817,6 +2865,112 @@ async function eliminarRepostaje(id) {
     toast('Repostaje eliminado');
   }catch(e){ toast('⚠ '+e.message); }
   renderRepostajesList();
+}
+
+// ── FICHAJE (control horario: entrada/salida diaria) ────
+// Necesita conexión siempre: la hora la pone el servidor (no el
+// dispositivo), para que sea fiable — por eso no hay caché offline aquí.
+function formatHorasMin(horas) {
+  const h=parseFloat(horas)||0;
+  const mins=Math.round(h*60);
+  return `${h.toFixed(2)} h (${mins} min)`;
+}
+function renderFichajeHoy(data) {
+  const cont=document.getElementById('fichajeEstadoContenido');
+  const notaHorario=document.getElementById('fichajeHorarioNota');
+  if(!cont) return;
+  if(notaHorario) notaHorario.textContent=`Tu horario: entrada ${data.horarioEntrada} · salida ${data.horarioSalida}`;
+  const f=data.fichaje;
+  if(!f||!f.hora_entrada){
+    cont.innerHTML=`
+      <div style="text-align:center;padding:6px 0 2px">
+        <div style="font-size:14px;color:var(--txt2);margin-bottom:14px">Aún no has fichado hoy</div>
+        <button class="btn bp bw" onclick="ficharEntrada()">🟢 Fichar entrada</button>
+      </div>`;
+  }else if(!f.hora_salida){
+    cont.innerHTML=`
+      <div style="text-align:center;padding:6px 0 2px">
+        <div style="font-size:14px;color:var(--txt2);margin-bottom:4px">Entrada: <strong>${f.hora_entrada}</strong></div>
+        <div style="font-size:12px;color:var(--txt3);margin-bottom:14px">Todavía no has fichado la salida</div>
+        <button class="btn bp bw" onclick="ficharSalida()">🔴 Fichar salida</button>
+      </div>`;
+  }else{
+    cont.innerHTML=`
+      <div style="text-align:center;padding:6px 0 2px">
+        <div style="font-size:14px;color:var(--txt2)">Entrada: <strong>${f.hora_entrada}</strong> · Salida: <strong>${f.hora_salida}</strong></div>
+        <div style="font-size:13px;color:var(--txt3);margin-top:4px">Horas de más hoy: <strong>${formatHorasMin(f.horas_de_mas)}</strong></div>
+        <div class="lft" style="margin-top:10px">Ya has fichado hoy. Vuelve mañana.</div>
+      </div>`;
+  }
+}
+async function cargarFichajeHoy() {
+  const cont=document.getElementById('fichajeEstadoContenido');
+  if(!cont) return;
+  if(!LS.token()){
+    cont.innerHTML='<div class="lft">Necesitas conexión a internet para fichar.</div>';
+    return;
+  }
+  try{
+    const data=await apiPost('/fichajes',{action:'hoy',token:LS.token()});
+    setCloudState('ok');
+    renderFichajeHoy(data);
+  }catch(e){
+    setCloudState(e.isNetwork?'off':'err');
+    cont.innerHTML='<div class="lft">No se ha podido consultar el fichaje de hoy (sin conexión o error del servidor).</div>';
+  }
+}
+async function ficharEntrada() {
+  if(!LS.token()){ toast('Necesitas conexión a internet para fichar'); return; }
+  try{
+    await apiPost('/fichajes',{action:'ficharEntrada',token:LS.token()});
+    setCloudState('ok');
+    toast('✓ Entrada fichada');
+    await cargarFichajeHoy();
+    cargarResumenMesFichaje();
+  }catch(e){
+    toast(e.isNetwork?'⚠ Sin conexión: no se ha podido fichar':'⚠ '+e.message);
+  }
+}
+async function ficharSalida() {
+  if(!LS.token()){ toast('Necesitas conexión a internet para fichar'); return; }
+  try{
+    await apiPost('/fichajes',{action:'ficharSalida',token:LS.token()});
+    setCloudState('ok');
+    toast('✓ Salida fichada');
+    await cargarFichajeHoy();
+    cargarResumenMesFichaje();
+  }catch(e){
+    toast(e.isNetwork?'⚠ Sin conexión: no se ha podido fichar':'⚠ '+e.message);
+  }
+}
+function renderFichajeHistorial(fichajes) {
+  const box=document.getElementById('fichajeHistorial');
+  if(!box) return;
+  box.innerHTML=(!fichajes||fichajes.length===0)
+    ?'<div style="font-size:13px;color:var(--txt3)">Sin fichajes este mes todavía</div>'
+    :fichajes.map(f=>{
+      const horas=parseFloat(f.horas_de_mas);
+      return `
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--brd);font-size:13px;flex-wrap:wrap">
+        <span style="flex:1;font-weight:600">${f.fecha?fmt(pd(f.fecha)):'—'}</span>
+        <span style="color:var(--txt2)">${f.hora_entrada||'—'} → ${f.hora_salida||'—'}</span>
+        <span style="font-weight:700;color:${horas>0?'var(--teal-l)':'var(--txt3)'}">${!isNaN(horas)?horas.toFixed(2)+' h':'—'}</span>
+      </div>`;
+    }).join('');
+}
+async function cargarResumenMesFichaje() {
+  const totalEl=document.getElementById('fichajeTotalMes');
+  if(!LS.token()){ if(totalEl) totalEl.textContent='—'; renderFichajeHistorial([]); return; }
+  try{
+    const data=await apiPost('/fichajes',{action:'resumenMes',token:LS.token()});
+    setCloudState('ok');
+    const total=data.totalHorasDeMas||0;
+    if(totalEl) totalEl.innerHTML=`${total.toFixed(2)} <span class="kpi-unit">h</span>`;
+    renderFichajeHistorial(data.fichajes||[]);
+  }catch(e){
+    setCloudState(e.isNetwork?'off':'err');
+    if(totalEl) totalEl.textContent='—';
+  }
 }
 
 // ── LOGO GALLERY ──────────────────────────────────────

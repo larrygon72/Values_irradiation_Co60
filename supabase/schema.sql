@@ -246,3 +246,45 @@ alter table estaciones_servicio enable row level security;
 -- compatibilidad con registros antiguos; estacion_id es la nueva
 -- referencia a la estación elegida en el desplegable.
 alter table repostajes add column if not exists estacion_id uuid references estaciones_servicio(id) on delete set null;
+
+-- ════════════════════════════════════════════════════════════
+-- AMPLIACIÓN — Fichaje (control horario): entrada/salida diaria
+-- por usuario, con horas de más calculadas contra el horario propio
+-- de cada usuario (no todos entran/salen a la misma hora).
+-- ════════════════════════════════════════════════════════════
+
+-- ── Horario esperado de cada usuario ─────────────────────────
+-- Se guarda como texto "HH:MM" (igual que el resto de horas de la app,
+-- que vienen de <input type="time">). Los valores por defecto son el
+-- ejemplo dado (entrada 07:00, salida 13:57); cada usuario puede tener
+-- el suyo — lo edita un administrador desde "Usuarios".
+alter table usuarios add column if not exists horario_entrada text not null default '07:00';
+alter table usuarios add column if not exists horario_salida  text not null default '13:57';
+
+-- ── TABLA: fichajes ───────────────────────────────────────────
+-- Una fila por usuario y día. La hora de entrada NO se usa (todavía) para
+-- ningún cálculo, aunque el usuario entre antes de su horario — solo se
+-- guarda como referencia. La hora de salida sí: se compara contra
+-- "horario_salida_esperado", que es una FOTOGRAFÍA del horario del
+-- usuario en el momento exacto de fichar la salida (no su horario
+-- actual), para que si un admin cambia el horario más adelante no se
+-- reescriba el histórico ya fichado.
+create table if not exists fichajes (
+  id                      uuid primary key default gen_random_uuid(),
+  usuario_nick            text not null,
+  fecha                   date not null,
+  hora_entrada            text,
+  hora_salida             text,
+  horario_salida_esperado text,
+  horas_de_mas numeric generated always as (
+    case when hora_salida is not null and horario_salida_esperado is not null
+      then greatest(0, extract(epoch from (hora_salida::time - horario_salida_esperado::time)) / 3600.0)
+      else null end
+  ) stored,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+-- Un único fichaje por usuario y día (sin distinguir mayúsculas en el nick)
+create unique index if not exists fichajes_usuario_fecha_idx on fichajes (lower(usuario_nick), fecha);
+create index if not exists fichajes_fecha_idx on fichajes (fecha desc);
+alter table fichajes enable row level security;

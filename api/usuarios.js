@@ -3,13 +3,14 @@
 // action:"listPublic" -> lista mínima (nick, nombre, apellidos, código) para
 //                        rellenar el desplegable de "Conductor" del formulario.
 //                        La puede pedir cualquier usuario con sesión iniciada.
-// action:"list"        -> lista completa (incluye rol y bloqueado). Solo admin.
-// action:"crear"       -> da de alta un usuario nuevo. Solo admin.
+// action:"list"        -> lista completa (incluye rol, bloqueado y horario). Solo admin.
+// action:"crear"       -> da de alta un usuario nuevo (con su horario de
+//                         entrada/salida, para el fichaje). Solo admin.
 // action:"eliminar"    -> borra un usuario. Solo admin, y a "Admin" solo
 //                         puede borrarlo el propio "Admin".
 // action:"desbloquear" -> desbloquea un usuario tras 3 intentos fallidos. Solo admin.
-// action:"editar"      -> modifica nombre/apellidos/rol/contraseña de un
-//                         usuario existente. Solo admin. El rol de "Admin"
+// action:"editar"      -> modifica nombre/apellidos/rol/contraseña/horario de
+//                         un usuario existente. Solo admin. El rol de "Admin"
 //                         solo puede cambiarlo el propio "Admin".
 
 import bcrypt from "bcryptjs";
@@ -17,6 +18,7 @@ import { getSupabaseAdmin } from "./_lib/supabaseAdmin.js";
 import { verificarToken } from "./_lib/auth.js";
 
 const NICK_PROTEGIDO = "admin"; // en minúsculas, para comparar sin distinguir mayúsculas
+const HORA_VALIDA = /^([01]\d|2[0-3]):[0-5]\d$/; // "HH:MM"
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -54,7 +56,7 @@ export default async function handler(req, res) {
     if (action === "list") {
       const { data, error } = await supabase
         .from("usuarios")
-        .select("nick, nombre, apellido1, apellido2, codigo, role, locked, created_at")
+        .select("nick, nombre, apellido1, apellido2, codigo, role, locked, created_at, horario_entrada, horario_salida")
         .order("nick", { ascending: true });
       if (error) throw error;
       return res.status(200).json({ usuarios: data });
@@ -62,13 +64,16 @@ export default async function handler(req, res) {
 
     // ── CREAR ─────────────────────────────────────────────
     if (action === "crear") {
-      const { nick, pass, nombre, apellido1, apellido2, role } = payload || {};
+      const { nick, pass, nombre, apellido1, apellido2, role, horarioEntrada, horarioSalida } = payload || {};
       const nickLimpio = (nick || "").trim();
       if (!nickLimpio || !pass) {
         return res.status(400).json({ error: "Usuario y contraseña son obligatorios" });
       }
       if (pass.length < 4) {
         return res.status(400).json({ error: "La contraseña debe tener al menos 4 caracteres" });
+      }
+      if ((horarioEntrada && !HORA_VALIDA.test(horarioEntrada)) || (horarioSalida && !HORA_VALIDA.test(horarioSalida))) {
+        return res.status(400).json({ error: "El horario debe tener formato HH:MM" });
       }
       const { data: existente } = await supabase
         .from("usuarios")
@@ -87,6 +92,8 @@ export default async function handler(req, res) {
         role: role === "admin" ? "admin" : "user",
         locked: false,
         intentos: 0,
+        horario_entrada: horarioEntrada || "07:00",
+        horario_salida: horarioSalida || "13:57",
       });
       if (error) throw error;
       return res.status(200).json({ ok: true });
@@ -125,7 +132,7 @@ export default async function handler(req, res) {
 
     // ── EDITAR ────────────────────────────────────────────
     if (action === "editar") {
-      const { nombre, apellido1, apellido2, role, nuevaPass } = payload || {};
+      const { nombre, apellido1, apellido2, role, nuevaPass, horarioEntrada, horarioSalida } = payload || {};
       const cambios = {};
       if (nombre !== undefined) cambios.nombre = (nombre || "").trim();
       if (apellido1 !== undefined) cambios.apellido1 = (apellido1 || "").trim();
@@ -145,6 +152,14 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: "La contraseña debe tener al menos 4 caracteres" });
         }
         cambios.password_hash = await bcrypt.hash(nuevaPass, 10);
+      }
+
+      if (horarioEntrada !== undefined || horarioSalida !== undefined) {
+        if ((horarioEntrada && !HORA_VALIDA.test(horarioEntrada)) || (horarioSalida && !HORA_VALIDA.test(horarioSalida))) {
+          return res.status(400).json({ error: "El horario debe tener formato HH:MM" });
+        }
+        if (horarioEntrada) cambios.horario_entrada = horarioEntrada;
+        if (horarioSalida) cambios.horario_salida = horarioSalida;
       }
 
       if (Object.keys(cambios).length === 0) {
