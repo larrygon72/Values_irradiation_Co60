@@ -272,6 +272,12 @@ alter table usuarios add column if not exists horario_salida  text not null defa
 --
 -- horas_de_mas PUEDE SER NEGATIVO: si el usuario sale antes de su horario,
 -- se resta del total de horas de más acumuladas (no se queda en 0).
+--
+-- IMPORTANTE: horas_de_mas es una columna NORMAL, no generada. Postgres no
+-- permite castear texto a "time" dentro de una columna generada (el motor
+-- la considera "no immutable" y da error 42P17), así que este cálculo lo
+-- hace el backend (api/fichajes.js) en el momento de fichar la salida o de
+-- corregir un fichaje, y guarda el resultado directamente aquí.
 create table if not exists fichajes (
   id                      uuid primary key default gen_random_uuid(),
   usuario_nick            text not null,
@@ -279,11 +285,7 @@ create table if not exists fichajes (
   hora_entrada            text,
   hora_salida             text,
   horario_salida_esperado text,
-  horas_de_mas numeric generated always as (
-    case when hora_salida is not null and horario_salida_esperado is not null
-      then extract(epoch from (hora_salida::time - horario_salida_esperado::time)) / 3600.0
-      else null end
-  ) stored,
+  horas_de_mas            numeric,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -293,12 +295,20 @@ create index if not exists fichajes_fecha_idx on fichajes (fecha desc);
 alter table fichajes enable row level security;
 
 -- Si ya habías ejecutado una versión anterior de este esquema, la columna
--- generada existente tenía un greatest(0, ...) que impedía valores
--- negativos. Esto la vuelve a crear sin ese límite (es seguro re-ejecutar
--- este bloque; si la tabla se acaba de crear arriba, no hace nada distinto).
-alter table fichajes drop column if exists horas_de_mas;
-alter table fichajes add column horas_de_mas numeric generated always as (
-  case when hora_salida is not null and horario_salida_esperado is not null
-    then extract(epoch from (hora_salida::time - horario_salida_esperado::time)) / 3600.0
-    else null end
-) stored;
+-- "horas_de_mas" existía como columna GENERADA (con o sin greatest(0,...)),
+-- lo cual falla en Supabase con el error 42P17. Esto la convierte en una
+-- columna normal, conservando los valores ya calculados que tuviera (es
+-- seguro re-ejecutar este bloque; si la tabla se acaba de crear arriba con
+-- la columna ya normal, no hace nada distinto).
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_name = 'fichajes' and column_name = 'horas_de_mas' and is_generated = 'ALWAYS'
+  ) then
+    alter table fichajes rename column horas_de_mas to horas_de_mas_old;
+    alter table fichajes add column horas_de_mas numeric;
+    update fichajes set horas_de_mas = horas_de_mas_old;
+    alter table fichajes drop column horas_de_mas_old;
+  end if;
+end $$;

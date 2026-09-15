@@ -9,10 +9,12 @@
 // La hora de entrada no se usa (todavía) para ningún cálculo, aunque el
 // usuario entre antes de su horario. La hora de salida sí: al fichar la
 // salida se guarda una FOTOGRAFÍA del horario de salida del usuario en
-// ese momento ("horario_salida_esperado"), y la base de datos calcula
-// solas las horas de más (nunca negativas) contra esa fotografía — así,
-// si un admin cambia el horario de alguien más adelante, no se altera lo
-// ya fichado.
+// ese momento ("horario_salida_esperado"), y aquí mismo (no en la base de
+// datos: Postgres no permite castear texto a "time" dentro de una columna
+// generada) se calculan las horas de más — PUEDEN SER NEGATIVAS si el
+// usuario sale antes de su horario, y eso resta del acumulado. Así, si un
+// admin cambia el horario de alguien más adelante, no se altera lo ya
+// fichado.
 //
 // action:"hoy"           -> fichaje de HOY del usuario de la sesión (o null)
 //                           + su horario de entrada/salida actual.
@@ -57,6 +59,15 @@ function fechaHoyMadrid() {
   }).formatToParts(new Date());
   const get = (t) => partes.find((p) => p.type === t).value;
   return `${get("year")}-${get("month")}-${get("day")}`;
+}
+// Diferencia en horas entre "horaSalida" y "horarioEsperado" (ambos
+// "HH:MM"). Puede ser negativa (el usuario salió antes de su horario).
+function calcularHorasDeMas(horaSalida, horarioEsperado) {
+  if (!horaSalida || !horarioEsperado) return null;
+  const [h1, m1] = horaSalida.split(":").map(Number);
+  const [h2, m2] = horarioEsperado.split(":").map(Number);
+  if ([h1, m1, h2, m2].some((n) => Number.isNaN(n))) return null;
+  return ((h1 * 60 + m1) - (h2 * 60 + m2)) / 60;
 }
 
 export default async function handler(req, res) {
@@ -135,10 +146,12 @@ export default async function handler(req, res) {
         .from("usuarios").select("horario_salida").ilike("nick", sesion.nick).maybeSingle();
       if (errU) throw errU;
       const horaActual = horaAhoraMadrid();
+      const horarioSalida = usuario?.horario_salida || "13:57";
       const { data: fichaje, error } = await supabase.from("fichajes")
         .update({
           hora_salida: horaActual,
-          horario_salida_esperado: usuario?.horario_salida || "13:57",
+          horario_salida_esperado: horarioSalida,
+          horas_de_mas: calcularHorasDeMas(horaActual, horarioSalida),
           updated_at: new Date().toISOString(),
         })
         .eq("id", existente.id).select("*").single();
@@ -201,9 +214,12 @@ export default async function handler(req, res) {
         if (horaSalida) {
           const { data: usuario } = await supabase
             .from("usuarios").select("horario_salida").ilike("nick", nickDestino).maybeSingle();
-          cambios.horario_salida_esperado = usuario?.horario_salida || "13:57";
+          const horarioSalida = usuario?.horario_salida || "13:57";
+          cambios.horario_salida_esperado = horarioSalida;
+          cambios.horas_de_mas = calcularHorasDeMas(horaSalida, horarioSalida);
         } else {
           cambios.horario_salida_esperado = null;
+          cambios.horas_de_mas = null;
         }
       }
 
