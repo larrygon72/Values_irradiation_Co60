@@ -1976,18 +1976,20 @@ const CAMPOS_INFORME=[
   {id:'irradiador',   label:'Irradiador',                grupo:'Irradiación', get:r=>r.irradiador_nombre||r.irradiador||''},
   {id:'irradiadorCod',label:'Código irradiador',         grupo:'Irradiación', get:r=>r.irradiador_codigo||''},
   {id:'tasa',         label:'Tasa (Gy/s)',               grupo:'Irradiación', get:r=>r.tasa?parseFloat(r.tasa).toFixed(8):''},
-  {id:'texp',         label:'Tiempo exposición teórico (s)', grupo:'Irradiación', get:r=>r.tiempo_exposicion??''},
-  {id:'texpReal',     label:'Tiempo exposición real (s)',    grupo:'Irradiación', get:r=>r.tiempo_exposicion_real??''},
+  {id:'texp',         label:'Tiempo exposición teórico (s)', grupo:'Irradiación', get:r=>r.tiempo_exposicion??'', sumable:true},
+  {id:'texpReal',     label:'Tiempo exposición real (s)',    grupo:'Irradiación', get:r=>r.tiempo_exposicion_real??'', sumable:true},
   {id:'hIniIrr',      label:'H. inicio irradiación',     grupo:'Irradiación', get:r=>r.h_inicio_irr||''},
   {id:'hFinIrr',      label:'H. fin irradiación',        grupo:'Irradiación', get:r=>r.h_fin_irr||''},
-  {id:'duracionIrr',  label:'Duración irradiación (h / min)', grupo:'Irradiación', get:r=>{
+  {id:'duracionIrr',  label:'Duración irradiación (h / min)', grupo:'Irradiación', sumable:true,
+    get:r=>{
       if(!r.h_inicio_irr||!r.h_fin_irr) return '';
       const mins=minutosEntre(r.h_inicio_irr,r.h_fin_irr);
       return `${(mins/60).toFixed(2)} h (${mins} min)`;
-    }},
-  {id:'expUsv',       label:'Exposición operador (µSv)', grupo:'Irradiación', get:r=>r.exposicion_usv??''},
-  {id:'dosimetros',   label:'Nº dosímetros',             grupo:'Irradiación', get:r=>r.dosimetros??''},
-  {id:'nUrnas',       label:'Nº urnas',                  grupo:'Urnas', get:r=>r.n_urnas??''},
+    },
+    sum:r=>(r.h_inicio_irr&&r.h_fin_irr)?minutosEntre(r.h_inicio_irr,r.h_fin_irr)/60:0},
+  {id:'expUsv',       label:'Exposición operador (µSv)', grupo:'Irradiación', get:r=>r.exposicion_usv??'', sumable:true},
+  {id:'dosimetros',   label:'Nº dosímetros',             grupo:'Irradiación', get:r=>r.dosimetros??'', sumable:true},
+  {id:'nUrnas',       label:'Nº urnas',                  grupo:'Urnas', get:r=>r.n_urnas??'', sumable:true},
   {id:'urna1',        label:'Urna 1 (nº · fecha · lote)',grupo:'Urnas', get:r=>fmtUrna(r.urna1)},
   {id:'urna2',        label:'Urna 2 (nº · fecha · lote)',grupo:'Urnas', get:r=>fmtUrna(r.urna2)},
   {id:'urna3',        label:'Urna 3 (nº · fecha · lote)',grupo:'Urnas', get:r=>fmtUrna(r.urna3)},
@@ -2002,7 +2004,7 @@ const CAMPOS_INFORME_FICHAJES=[
   {id:'horaEntrada',     label:'Hora entrada',                 grupo:'Fichaje', get:r=>r.hora_entrada||''},
   {id:'horaSalida',      label:'Hora salida',                  grupo:'Fichaje', get:r=>r.hora_salida||''},
   {id:'horarioEsperado', label:'Horario de salida esperado',   grupo:'Fichaje', get:r=>r.horario_salida_esperado||''},
-  {id:'horasDeMas',      label:'Horas de más',                 grupo:'Fichaje', get:r=>r.horas_de_mas!=null?parseFloat(r.horas_de_mas).toFixed(2):''},
+  {id:'horasDeMas',      label:'Horas de más',                 grupo:'Fichaje', get:r=>r.horas_de_mas!=null?parseFloat(r.horas_de_mas).toFixed(2):'', sumable:true},
 ];
 // Catálogo de campos activo según el tipo de informe elegido.
 function camposInformeCatalogo() {
@@ -2024,10 +2026,16 @@ function renderCamposInforme() {
     <div style="margin-bottom:10px">
       <div style="font-size:12px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px">${g}</div>
       ${catalogo.filter(c=>c.grupo===g).map(c=>`
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0">
-          <input type="checkbox" class="campoInformeChk" value="${c.id}" checked onchange="actualizarResumenCampos()" style="width:auto">
-          ${c.label}
-        </label>`).join('')}
+        <div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;flex:1">
+            <input type="checkbox" class="campoInformeChk" value="${c.id}" checked onchange="actualizarResumenCampos()" style="width:auto">
+            ${c.label}
+          </label>
+          ${c.sumable?`<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--green-l);font-weight:600;flex-shrink:0" title="Sumar esta columna en la vista previa y en el informe exportado">
+            <input type="checkbox" class="campoSumaChk" data-campo="${c.id}" style="width:auto">
+            Σ suma
+          </label>`:''}
+        </div>`).join('')}
     </div>`).join('');
   actualizarResumenCampos();
 }
@@ -2038,6 +2046,21 @@ function marcarTodosCampos(marcar) {
 function camposInformeSeleccionados() {
   const ids=[...document.querySelectorAll('.campoInformeChk:checked')].map(chk=>chk.value);
   return camposInformeCatalogo().filter(c=>ids.includes(c.id));
+}
+// Campos marcados con "Σ suma" que además están incluidos en el informe
+// (si se desmarca un campo, su suma deja de tenerse en cuenta aunque el
+// interruptor Σ siga marcado).
+function camposASumar() {
+  const marcados=[...document.querySelectorAll('.campoSumaChk:checked')].map(chk=>chk.dataset.campo);
+  const incluidos=camposInformeSeleccionados().map(c=>c.id);
+  return marcados.filter(id=>incluidos.includes(id));
+}
+function sumarCampo(campo, regs) {
+  return regs.reduce((acc,r)=>{
+    const bruto=campo.sum?campo.sum(r):campo.get(r);
+    const v=parseFloat(bruto);
+    return acc+(isNaN(v)?0:v);
+  },0);
 }
 // ── Selector de campos: ventana emergente para no saturar la pantalla ──
 function abrirSelectorCampos() {
@@ -2051,7 +2074,7 @@ function cerrarSelectorCampos() {
 function actualizarResumenCampos() {
   const el=document.getElementById('camposResumen');
   if(!el) return;
-  const total=CAMPOS_INFORME.length;
+  const total=camposInformeCatalogo().length;
   const marcados=camposInformeSeleccionados().length;
   el.textContent=`(${marcados} de ${total})`;
 }
@@ -2073,11 +2096,26 @@ function renderVistaPreviaInforme() {
     return;
   }
   const filas=regs.slice(0,VISTA_PREVIA_LIMITE);
+  const sumIds=camposASumar();
+  let tfoot='';
+  if(sumIds.length){
+    // El total SIEMPRE suma todos los registros encontrados, no solo los
+    // que se ven en la vista previa (que puede estar recortada).
+    const celdas=campos.map((c,i)=>{
+      const suma=sumIds.includes(c.id);
+      if(i===0) return `<td style="font-weight:700">${suma?`Total: ${sumarCampo(c,regs).toFixed(2)}`:'Total'}</td>`;
+      return suma?`<td class="tdSuma">${sumarCampo(c,regs).toFixed(2)}</td>`:'<td></td>';
+    });
+    tfoot=`<tfoot><tr>${celdas.join('')}</tr></tfoot>`;
+  }
   tabla.innerHTML=`<thead><tr>${campos.map(c=>`<th>${c.label}</th>`).join('')}</tr></thead>`+
-    `<tbody>${filas.map(r=>`<tr>${campos.map(c=>`<td>${c.get(r)??''}</td>`).join('')}</tr>`).join('')}</tbody>`;
-  nota.textContent = regs.length>VISTA_PREVIA_LIMITE
+    `<tbody>${filas.map(r=>`<tr>${campos.map(c=>`<td>${c.get(r)??''}</td>`).join('')}</tr>`).join('')}</tbody>`+tfoot;
+  const notaRecorte = regs.length>VISTA_PREVIA_LIMITE
     ? `Mostrando los primeros ${VISTA_PREVIA_LIMITE} de ${regs.length} registros (el informe exportado incluye todos).`
     : `${regs.length} registro(s)`;
+  nota.textContent = sumIds.length && regs.length>VISTA_PREVIA_LIMITE
+    ? `${notaRecorte} El total suma TODOS los registros encontrados, no solo los mostrados.`
+    : notaRecorte;
   if(exportWrap) exportWrap.style.display='flex';
 }
 function ocultarVistaPreviaInforme() {
@@ -2115,6 +2153,15 @@ async function buscarInformes() {
     note.textContent='No se ha podido consultar (sin conexión o error del servidor).';
   }
 }
+// Fila de totales compartida por CSV y PDF: "Total" en la primera columna,
+// la suma bajo cada columna marcada con "Σ suma", vacío en el resto.
+function filaTotalesInforme(campos, regs, sumIds) {
+  return campos.map((c,i)=>{
+    const suma=sumIds.includes(c.id);
+    if(i===0) return suma?`Total: ${sumarCampo(c,regs).toFixed(2)}`:'Total';
+    return suma?sumarCampo(c,regs).toFixed(2):'';
+  });
+}
 async function exportInformeCSV() {
   const regs=S.informesRaw||[];
   if(!regs.length){toast('Busca primero un periodo con registros');return;}
@@ -2122,6 +2169,8 @@ async function exportInformeCSV() {
   if(!campos.length){toast('Selecciona al menos un campo para el informe');return;}
   const header=campos.map(c=>c.label);
   const rows=regs.map(r=>campos.map(c=>c.get(r)));
+  const sumIds=camposASumar();
+  if(sumIds.length) rows.push(filaTotalesInforme(campos,regs,sumIds));
   const content=[header,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\r\n');
   const filename=`informe_${S.informesTipo==='fichajes'?'fichajes':'registros'}_${dateStamp()}.csv`;
   const result=await dlFile(filename,content,'text/csv;charset=utf-8;');
@@ -2136,12 +2185,25 @@ async function exportInformePDF() {
   if(!window.jspdf){toast('⚠ No se pudo cargar la librería de PDF (revisa tu conexión a internet)');return;}
   const header=campos.map(c=>c.label);
   const rows=regs.map(r=>campos.map(c=>c.get(r)));
+  const sumIds=camposASumar();
+  const foot=sumIds.length?[filaTotalesInforme(campos,regs,sumIds)]:null;
+  const sumIdxs=campos.map((c,i)=>sumIds.includes(c.id)?i:-1).filter(i=>i>=0);
   const {jsPDF}=window.jspdf;
   const doc=new jsPDF({orientation:'landscape',unit:'pt'});
   const logo=await cargarLogoInforme('img/mosquito_logo_team.png');
   const titulo=S.informesTipo==='fichajes' ? 'Values Irradiation WEB-210 — Informe de fichajes' : 'Values Irradiation WEB-210 — Informe';
   const {tablaY}=dibujarCabeceraPDF(doc, logo, titulo);
-  doc.autoTable({head:[header],body:rows,startY:tablaY,styles:{fontSize:7,cellPadding:3},headStyles:{fillColor:[76,110,245]}});
+  doc.autoTable({
+    head:[header], body:rows, foot, startY:tablaY,
+    styles:{fontSize:7,cellPadding:3}, headStyles:{fillColor:[76,110,245]},
+    footStyles:{fontStyle:'bold'},
+    didParseCell:(data)=>{
+      if(data.section==='foot' && sumIdxs.includes(data.column.index)){
+        data.cell.styles.fillColor=[209,250,219];
+        data.cell.styles.textColor=[16,122,64];
+      }
+    },
+  });
   const blob=doc.output('blob');
   const filename=`informe_${S.informesTipo==='fichajes'?'fichajes':'registros'}_${dateStamp()}.pdf`;
   const result=await dlBlob(filename,blob);

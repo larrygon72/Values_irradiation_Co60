@@ -488,6 +488,9 @@ body.theme-light .fl input[type=time]::-webkit-calendar-picker-indicator{filter:
 .dtbl td{padding:8px 10px;text-align:center;border-bottom:1px solid var(--brd);color:var(--txt2)}
 .dtbl tr.hl td{background:var(--teal-dim);color:var(--teal-l);font-weight:700}
 .dtbl tr:hover td{background:var(--surf2)}
+/* Celda de totales en la vista previa/exportación de Informes ("Σ suma") */
+.dtbl tfoot td{border-top:2px solid var(--brd2);font-family:var(--fmono)}
+.dtbl td.tdSuma{background:rgba(34,197,94,.16);color:var(--green-l);font-weight:700}
 
 /* ── MULTIDOSIS ── */
 @media(min-width:600px){#mdCont{display:grid!important;grid-template-columns:1fr 1fr;gap:16px;align-items:start}}
