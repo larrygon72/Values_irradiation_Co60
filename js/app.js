@@ -2936,10 +2936,18 @@ async function eliminarRepostaje(id) {
 // ── FICHAJE (control horario: entrada/salida diaria) ────
 // Necesita conexión siempre: la hora la pone el servidor (no el
 // dispositivo), para que sea fiable — por eso no hay caché offline aquí.
-function formatHorasMin(horas) {
+// Formatea horas decimales como "H:MM" (no como número decimal: 0.5 -> "0:30",
+// 1.75 -> "1:45"). No se envuelve a las 24h porque esto es un ACUMULADO de
+// horas de más, no la hora del reloj — puede llegar a "100:00" o más sin
+// problema. Los negativos (el usuario salió antes de su horario) llevan el
+// signo delante de todo, ej. "-0:37".
+function formatHorasHM(horas) {
   const h=parseFloat(horas)||0;
-  const mins=Math.round(h*60);
-  return `${h.toFixed(2)} h (${mins} min)`;
+  const signo=h<0?'-':'';
+  const totalMin=Math.round(Math.abs(h)*60);
+  const horasEnteras=Math.floor(totalMin/60);
+  const minutos=totalMin%60;
+  return `${signo}${horasEnteras}:${String(minutos).padStart(2,'0')}`;
 }
 // Las horas de más pueden ser negativas (el usuario salió antes de su
 // horario, y eso resta del acumulado) — se marcan en rojo para que se note
@@ -2972,7 +2980,7 @@ function renderFichajeHoy(data) {
     cont.innerHTML=`
       <div style="text-align:center;padding:6px 0 2px">
         <div style="font-size:14px;color:var(--txt2)">Entrada: <strong>${f.hora_entrada}</strong> · Salida: <strong>${f.hora_salida}</strong></div>
-        <div style="font-size:13px;color:var(--txt3);margin-top:4px">Horas de más hoy: <strong style="color:${colorHorasDeMas(f.horas_de_mas)}">${formatHorasMin(f.horas_de_mas)}</strong></div>
+        <div style="font-size:13px;color:var(--txt3);margin-top:4px">Horas de más hoy: <strong style="color:${colorHorasDeMas(f.horas_de_mas)}">${formatHorasHM(f.horas_de_mas)}</strong></div>
         <div class="lft" style="margin-top:10px">Ya has fichado hoy. Vuelve mañana.</div>
       </div>`;
   }
@@ -3028,7 +3036,7 @@ function renderFichajeHistorial(fichajes) {
       <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--brd);font-size:13px;flex-wrap:wrap">
         <span style="flex:1;font-weight:600">${f.fecha?fmt(pd(f.fecha)):'—'}</span>
         <span style="color:var(--txt2)">${f.hora_entrada||'—'} → ${f.hora_salida||'—'}</span>
-        <span style="font-weight:700;color:${colorHorasDeMas(horas)}">${!isNaN(horas)?horas.toFixed(2)+' h':'—'}</span>
+        <span style="font-weight:700;color:${colorHorasDeMas(horas)}">${!isNaN(horas)?formatHorasHM(horas):'—'}</span>
       </div>`;
     }).join('');
 }
@@ -3040,7 +3048,7 @@ async function cargarResumenMesFichaje() {
     setCloudState('ok');
     const total=data.totalHorasDeMas||0;
     if(totalEl){
-      totalEl.innerHTML=`${total.toFixed(2)} <span class="kpi-unit">h</span>`;
+      totalEl.textContent=formatHorasHM(total);
       totalEl.style.color=colorHorasDeMas(total);
     }
     renderFichajeHistorial(data.fichajes||[]);
