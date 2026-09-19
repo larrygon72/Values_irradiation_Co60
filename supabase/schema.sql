@@ -261,16 +261,31 @@ alter table repostajes add column if not exists estacion_id uuid references esta
 alter table usuarios add column if not exists horario_entrada text not null default '07:00';
 alter table usuarios add column if not exists horario_salida  text not null default '13:57';
 
+-- Tipo de jornada de cada usuario:
+--  · "fijo"      -> solo importa la hora de SALIDA. Se compara contra el
+--                   horario de salida, con 15 minutos de cortesía (si la
+--                   diferencia real, antes o después, es de 15 min o menos
+--                   no cuenta nada; si se supera, cuenta la diferencia
+--                   completa, no solo el exceso sobre la cortesía).
+--  · "flexible"  -> importa la JORNADA trabajada (salida real - entrada
+--                   real) frente a la jornada esperada (horario de salida
+--                   - horario de entrada). Da igual a qué hora exacta se
+--                   entre o se salga, mientras se cumplan las horas.
+alter table usuarios add column if not exists tipo_horario text not null default 'fijo'
+  check (tipo_horario in ('fijo','flexible'));
+
 -- ── TABLA: fichajes ───────────────────────────────────────────
--- Una fila por usuario y día. La hora de entrada NO se usa (todavía) para
--- ningún cálculo, aunque el usuario entre antes de su horario — solo se
--- guarda como referencia. La hora de salida sí: se compara contra
--- "horario_salida_esperado", que es una FOTOGRAFÍA del horario del
--- usuario en el momento exacto de fichar la salida (no su horario
--- actual), para que si un admin cambia el horario más adelante no se
--- reescriba el histórico ya fichado.
+-- Una fila por usuario y día. Con horario FIJO la hora de entrada no se
+-- usa para el cálculo (solo la de salida, con la cortesía descrita arriba);
+-- con horario FLEXIBLE se usan las dos (jornada trabajada vs. esperada).
 --
--- horas_de_mas PUEDE SER NEGATIVO: si el usuario sale antes de su horario,
+-- horario_entrada_esperado, horario_salida_esperado y tipo_horario_aplicado
+-- son una FOTOGRAFÍA del horario y tipo del usuario en el momento exacto de
+-- fichar la salida (o de corregir el fichaje) — no su horario/tipo actual,
+-- para que si un admin lo cambia más adelante no se reescriba el histórico
+-- ya fichado.
+--
+-- horas_de_mas PUEDE SER NEGATIVO: si el usuario ha trabajado de menos,
 -- se resta del total de horas de más acumuladas (no se queda en 0).
 --
 -- IMPORTANTE: horas_de_mas es una columna NORMAL, no generada. Postgres no
@@ -279,13 +294,15 @@ alter table usuarios add column if not exists horario_salida  text not null defa
 -- hace el backend (api/fichajes.js) en el momento de fichar la salida o de
 -- corregir un fichaje, y guarda el resultado directamente aquí.
 create table if not exists fichajes (
-  id                      uuid primary key default gen_random_uuid(),
-  usuario_nick            text not null,
-  fecha                   date not null,
-  hora_entrada            text,
-  hora_salida             text,
-  horario_salida_esperado text,
-  horas_de_mas            numeric,
+  id                       uuid primary key default gen_random_uuid(),
+  usuario_nick             text not null,
+  fecha                    date not null,
+  hora_entrada             text,
+  hora_salida              text,
+  horario_entrada_esperado text,
+  horario_salida_esperado  text,
+  tipo_horario_aplicado    text,
+  horas_de_mas             numeric,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -293,6 +310,11 @@ create table if not exists fichajes (
 create unique index if not exists fichajes_usuario_fecha_idx on fichajes (lower(usuario_nick), fecha);
 create index if not exists fichajes_fecha_idx on fichajes (fecha desc);
 alter table fichajes enable row level security;
+
+-- Por si ya tenías la tabla de una versión anterior de este esquema, sin
+-- las columnas nuevas (es seguro re-ejecutar este bloque).
+alter table fichajes add column if not exists horario_entrada_esperado text;
+alter table fichajes add column if not exists tipo_horario_aplicado text;
 
 -- Si ya habías ejecutado una versión anterior de este esquema, la columna
 -- "horas_de_mas" existía como columna GENERADA (con o sin greatest(0,...)),

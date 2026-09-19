@@ -857,6 +857,11 @@
         <div class="fl"><label>Horario entrada</label><input type="time" id="nHorarioEntrada" value="07:00"></div>
         <div class="fl"><label>Horario salida</label><input type="time" id="nHorarioSalida" value="13:57"></div>
       </div>
+      <div class="fl"><label>Tipo de jornada</label>
+        <select id="nTipoHorario">
+          <option value="fijo">Fija (horas de más solo si supera 15 min de cortesía en la salida)</option>
+          <option value="flexible">Flexible (lo que importa son las horas trabajadas, no la hora exacta)</option>
+        </select></div>
       <button class="btn bp bw" onclick="addUsr()">Añadir usuario</button>
       <hr class="xdiv">
       <div id="usrList"></div>

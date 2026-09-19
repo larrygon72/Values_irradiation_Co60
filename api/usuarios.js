@@ -3,15 +3,18 @@
 // action:"listPublic" -> lista mínima (nick, nombre, apellidos, código) para
 //                        rellenar el desplegable de "Conductor" del formulario.
 //                        La puede pedir cualquier usuario con sesión iniciada.
-// action:"list"        -> lista completa (incluye rol, bloqueado y horario). Solo admin.
+// action:"list"        -> lista completa (incluye rol, bloqueado, horario y
+//                         tipo de jornada). Solo admin.
 // action:"crear"       -> da de alta un usuario nuevo (con su horario de
-//                         entrada/salida, para el fichaje). Solo admin.
+//                         entrada/salida y tipo de jornada —fijo o
+//                         flexible—, para el fichaje). Solo admin.
 // action:"eliminar"    -> borra un usuario. Solo admin, y a "Admin" solo
 //                         puede borrarlo el propio "Admin".
 // action:"desbloquear" -> desbloquea un usuario tras 3 intentos fallidos. Solo admin.
-// action:"editar"      -> modifica nombre/apellidos/rol/contraseña/horario de
-//                         un usuario existente. Solo admin. El rol de "Admin"
-//                         solo puede cambiarlo el propio "Admin".
+// action:"editar"      -> modifica nombre/apellidos/rol/contraseña/horario/
+//                         tipo de jornada de un usuario existente. Solo
+//                         admin. El rol de "Admin" solo puede cambiarlo el
+//                         propio "Admin".
 
 import bcrypt from "bcryptjs";
 import { getSupabaseAdmin } from "./_lib/supabaseAdmin.js";
@@ -56,7 +59,7 @@ export default async function handler(req, res) {
     if (action === "list") {
       const { data, error } = await supabase
         .from("usuarios")
-        .select("nick, nombre, apellido1, apellido2, codigo, role, locked, created_at, horario_entrada, horario_salida")
+        .select("nick, nombre, apellido1, apellido2, codigo, role, locked, created_at, horario_entrada, horario_salida, tipo_horario")
         .order("nick", { ascending: true });
       if (error) throw error;
       return res.status(200).json({ usuarios: data });
@@ -64,7 +67,7 @@ export default async function handler(req, res) {
 
     // ── CREAR ─────────────────────────────────────────────
     if (action === "crear") {
-      const { nick, pass, nombre, apellido1, apellido2, role, horarioEntrada, horarioSalida } = payload || {};
+      const { nick, pass, nombre, apellido1, apellido2, role, horarioEntrada, horarioSalida, tipoHorario } = payload || {};
       const nickLimpio = (nick || "").trim();
       if (!nickLimpio || !pass) {
         return res.status(400).json({ error: "Usuario y contraseña son obligatorios" });
@@ -74,6 +77,9 @@ export default async function handler(req, res) {
       }
       if ((horarioEntrada && !HORA_VALIDA.test(horarioEntrada)) || (horarioSalida && !HORA_VALIDA.test(horarioSalida))) {
         return res.status(400).json({ error: "El horario debe tener formato HH:MM" });
+      }
+      if (tipoHorario && !["fijo", "flexible"].includes(tipoHorario)) {
+        return res.status(400).json({ error: 'El tipo de horario debe ser "fijo" o "flexible"' });
       }
       const { data: existente } = await supabase
         .from("usuarios")
@@ -94,6 +100,7 @@ export default async function handler(req, res) {
         intentos: 0,
         horario_entrada: horarioEntrada || "07:00",
         horario_salida: horarioSalida || "13:57",
+        tipo_horario: tipoHorario === "flexible" ? "flexible" : "fijo",
       });
       if (error) throw error;
       return res.status(200).json({ ok: true });
@@ -132,7 +139,7 @@ export default async function handler(req, res) {
 
     // ── EDITAR ────────────────────────────────────────────
     if (action === "editar") {
-      const { nombre, apellido1, apellido2, role, nuevaPass, horarioEntrada, horarioSalida } = payload || {};
+      const { nombre, apellido1, apellido2, role, nuevaPass, horarioEntrada, horarioSalida, tipoHorario } = payload || {};
       const cambios = {};
       if (nombre !== undefined) cambios.nombre = (nombre || "").trim();
       if (apellido1 !== undefined) cambios.apellido1 = (apellido1 || "").trim();
@@ -160,6 +167,13 @@ export default async function handler(req, res) {
         }
         if (horarioEntrada) cambios.horario_entrada = horarioEntrada;
         if (horarioSalida) cambios.horario_salida = horarioSalida;
+      }
+
+      if (tipoHorario !== undefined) {
+        if (!["fijo", "flexible"].includes(tipoHorario)) {
+          return res.status(400).json({ error: 'El tipo de horario debe ser "fijo" o "flexible"' });
+        }
+        cambios.tipo_horario = tipoHorario;
       }
 
       if (Object.keys(cambios).length === 0) {

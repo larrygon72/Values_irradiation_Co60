@@ -1999,12 +1999,14 @@ const CAMPOS_INFORME=[
 // vez de Registros de irradiación — son entidades distintas, así que cada
 // una tiene su propio catálogo de campos.
 const CAMPOS_INFORME_FICHAJES=[
-  {id:'fecha',           label:'Fecha',                        grupo:'Fichaje', get:r=>r.fecha?fmt(pd(r.fecha)):''},
-  {id:'usuario',         label:'Usuario',                      grupo:'Fichaje', get:r=>r.usuario_nick||''},
-  {id:'horaEntrada',     label:'Hora entrada',                 grupo:'Fichaje', get:r=>r.hora_entrada||''},
-  {id:'horaSalida',      label:'Hora salida',                  grupo:'Fichaje', get:r=>r.hora_salida||''},
-  {id:'horarioEsperado', label:'Horario de salida esperado',   grupo:'Fichaje', get:r=>r.horario_salida_esperado||''},
-  {id:'horasDeMas',      label:'Horas de más',                 grupo:'Fichaje', get:r=>r.horas_de_mas!=null?parseFloat(r.horas_de_mas).toFixed(2):'', sumable:true},
+  {id:'fecha',            label:'Fecha',                        grupo:'Fichaje', get:r=>r.fecha?fmt(pd(r.fecha)):''},
+  {id:'usuario',          label:'Usuario',                      grupo:'Fichaje', get:r=>r.usuario_nick||''},
+  {id:'tipoHorario',      label:'Tipo de jornada',               grupo:'Fichaje', get:r=>r.tipo_horario_aplicado==='flexible'?'Flexible':(r.tipo_horario_aplicado==='fijo'?'Fija':'')},
+  {id:'horaEntrada',      label:'Hora entrada',                 grupo:'Fichaje', get:r=>r.hora_entrada||''},
+  {id:'horaSalida',       label:'Hora salida',                  grupo:'Fichaje', get:r=>r.hora_salida||''},
+  {id:'horarioEntradaEsp',label:'Horario de entrada esperado',  grupo:'Fichaje', get:r=>r.horario_entrada_esperado||''},
+  {id:'horarioEsperado',  label:'Horario de salida esperado',   grupo:'Fichaje', get:r=>r.horario_salida_esperado||''},
+  {id:'horasDeMas',       label:'Horas de más',                 grupo:'Fichaje', get:r=>r.horas_de_mas!=null?parseFloat(r.horas_de_mas).toFixed(2):'', sumable:true},
 ];
 // Catálogo de campos activo según el tipo de informe elegido.
 function camposInformeCatalogo() {
@@ -2322,9 +2324,10 @@ async function addUsr() {
   const role=document.getElementById('nrole').value;
   const horarioEntrada=document.getElementById('nHorarioEntrada').value||'07:00';
   const horarioSalida=document.getElementById('nHorarioSalida').value||'13:57';
+  const tipoHorario=document.getElementById('nTipoHorario').value||'fijo';
   if(!nick||!pass){toast('Rellena usuario y contraseña');return;}
   try{
-    await apiPost('/usuarios',{action:'crear',token:LS.token(),payload:{nick,pass,nombre,apellido1:ap1,apellido2:ap2,role,horarioEntrada,horarioSalida}});
+    await apiPost('/usuarios',{action:'crear',token:LS.token(),payload:{nick,pass,nombre,apellido1:ap1,apellido2:ap2,role,horarioEntrada,horarioSalida,tipoHorario}});
     setCloudState('ok');
     toast(`✓ Usuario "${nick}" creado`);
   }catch(e){
@@ -2332,13 +2335,14 @@ async function addUsr() {
     setCloudState('off');
     const users=LS.users();
     if(users.find(u=>u.name.toLowerCase()===nick.toLowerCase())){toast('El usuario ya existe');return;}
-    users.push({name:nick,pass,role,att:0,locked:false,nombre,apellido1:ap1,apellido2:ap2,horarioEntrada,horarioSalida});
+    users.push({name:nick,pass,role,att:0,locked:false,nombre,apellido1:ap1,apellido2:ap2,horarioEntrada,horarioSalida,tipoHorario});
     LS.setU(users);
     toast(`✓ Usuario "${nick}" creado (local, sin conexión)`);
   }
   ['nusr','nnombre','nap1','nap2','npass'].forEach(id=>{document.getElementById(id).value='';});
   document.getElementById('nHorarioEntrada').value='07:00';
   document.getElementById('nHorarioSalida').value='13:57';
+  document.getElementById('nTipoHorario').value='fijo';
   renderUsrs();
   refreshDrivers().then(()=>populateConductorSelect());
 }
@@ -2353,7 +2357,8 @@ async function renderUsrs() {
       name:u.nick, role:u.role, locked:u.locked,
       nombre:u.nombre||'', apellido1:u.apellido1||'', apellido2:u.apellido2||'',
       codigo:u.codigo||codigoConductor(u.nombre,u.apellido1,u.apellido2),
-      horarioEntrada:u.horario_entrada||'07:00', horarioSalida:u.horario_salida||'13:57'
+      horarioEntrada:u.horario_entrada||'07:00', horarioSalida:u.horario_salida||'13:57',
+      tipoHorario:u.tipo_horario||'fijo'
     }));
     setCloudState('ok');
   }catch(e){
@@ -2363,7 +2368,8 @@ async function renderUsrs() {
       name:u.name, role:u.role, locked:u.locked,
       nombre:u.nombre||'', apellido1:u.apellido1||'', apellido2:u.apellido2||'',
       codigo:codigoConductor(u.nombre||u.name,u.apellido1||'',u.apellido2||''),
-      horarioEntrada:u.horarioEntrada||'07:00', horarioSalida:u.horarioSalida||'13:57'
+      horarioEntrada:u.horarioEntrada||'07:00', horarioSalida:u.horarioSalida||'13:57',
+      tipoHorario:u.tipoHorario||'fijo'
     }));
   }
   if(note) note.textContent = enNube ? '' : '⚠ Mostrando usuarios de este dispositivo (sin conexión con la nube).';
@@ -2381,7 +2387,7 @@ async function renderUsrs() {
       <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--brd);font-size:13px;flex-wrap:wrap">
         <span style="font-family:var(--fh);font-size:11px;font-weight:700;background:rgba(76,110,245,.18);color:var(--blue-l);padding:2px 6px;border-radius:4px;flex-shrink:0">${u.codigo}</span>
         <span style="flex:1;font-weight:600">${u.name}${nombreCompleto?` <span style="color:var(--txt3);font-weight:400">— ${nombreCompleto}</span>`:''}</span>
-        <span style="color:var(--txt3);font-size:11px">⏰ ${u.horarioEntrada||'07:00'}–${u.horarioSalida||'13:57'}</span>
+        <span style="color:var(--txt3);font-size:11px">⏰ ${u.horarioEntrada||'07:00'}–${u.horarioSalida||'13:57'} · ${u.tipoHorario==='flexible'?'flexible':'fija'}</span>
         <span style="color:var(--txt3)">${u.role}</span>
         <button class="btn bo bs" style="padding:3px 8px;font-size:11px" onclick="editarUsrInicio('${nickSeguro}')">✏️ Editar</button>
         ${u.locked
@@ -2415,6 +2421,11 @@ function filaUsrEdicion(u, nickSeguro) {
       <div class="fl"><label>Horario entrada</label><input type="time" id="eu_horarioEntrada" value="${esc(u.horarioEntrada||'07:00')}"></div>
       <div class="fl"><label>Horario salida</label><input type="time" id="eu_horarioSalida" value="${esc(u.horarioSalida||'13:57')}"></div>
     </div>
+    <div class="fl"><label>Tipo de jornada</label>
+      <select id="eu_tipoHorario">
+        <option value="fijo" ${u.tipoHorario!=='flexible'?'selected':''}>Fija (cortesía de 15 min en la salida)</option>
+        <option value="flexible" ${u.tipoHorario==='flexible'?'selected':''}>Flexible (importan las horas trabajadas)</option>
+      </select></div>
     <div class="fl"><label>Nueva contraseña (opcional)</label><input type="password" id="eu_pass" placeholder="Déjalo en blanco para no cambiarla"></div>
     <div style="display:flex;gap:8px">
       <button class="btn bp bs" style="flex:1" onclick="editarUsrGuardar('${nickSeguro}')">Guardar cambios</button>
@@ -2433,8 +2444,9 @@ async function editarUsrGuardar(nick) {
   const nuevaPass=document.getElementById('eu_pass').value;
   const horarioEntrada=document.getElementById('eu_horarioEntrada').value;
   const horarioSalida=document.getElementById('eu_horarioSalida').value;
+  const tipoHorario=document.getElementById('eu_tipoHorario').value;
   try{
-    await apiPost('/usuarios',{action:'editar',token:LS.token(),payload:{nick,nombre,apellido1:ap1,apellido2:ap2,role,nuevaPass:nuevaPass||undefined,horarioEntrada,horarioSalida}});
+    await apiPost('/usuarios',{action:'editar',token:LS.token(),payload:{nick,nombre,apellido1:ap1,apellido2:ap2,role,nuevaPass:nuevaPass||undefined,horarioEntrada,horarioSalida,tipoHorario}});
     setCloudState('ok');
     toast('✓ Usuario actualizado');
   }catch(e){
@@ -2446,7 +2458,7 @@ async function editarUsrGuardar(nick) {
       u.nombre=nombre; u.apellido1=ap1; u.apellido2=ap2;
       if(role!==undefined) u.role=role;
       if(nuevaPass) u.pass=nuevaPass;
-      u.horarioEntrada=horarioEntrada; u.horarioSalida=horarioSalida;
+      u.horarioEntrada=horarioEntrada; u.horarioSalida=horarioSalida; u.tipoHorario=tipoHorario;
       LS.setU(users);
       toast('✓ Usuario actualizado (local, sin conexión)');
     }
@@ -2957,11 +2969,20 @@ function colorHorasDeMas(horas) {
   if(isNaN(h)||h===0) return 'var(--txt3)';
   return h<0 ? 'var(--red-l)' : 'var(--teal-l)';
 }
+// Texto de referencia del horario/tipo de jornada del usuario, para que se
+// vea siempre de dónde salen los cálculos de horas de más.
+function notaHorarioTexto(data) {
+  if(data.tipoHorario==='flexible'){
+    const jornadaMin=minutosEntre(data.horarioEntrada,data.horarioSalida);
+    return `Tu jornada: ${formatHorasHM(jornadaMin/60)} h (flexible, de referencia ${data.horarioEntrada} a ${data.horarioSalida} — importan las horas trabajadas, no la hora exacta de entrada/salida)`;
+  }
+  return `Tu horario: entrada ${data.horarioEntrada} · salida ${data.horarioSalida} (fijo, con 15 min de cortesía en la salida)`;
+}
 function renderFichajeHoy(data) {
   const cont=document.getElementById('fichajeEstadoContenido');
   const notaHorario=document.getElementById('fichajeHorarioNota');
   if(!cont) return;
-  if(notaHorario) notaHorario.textContent=`Tu horario: entrada ${data.horarioEntrada} · salida ${data.horarioSalida}`;
+  if(notaHorario) notaHorario.textContent=notaHorarioTexto(data);
   const f=data.fichaje;
   if(!f||!f.hora_entrada){
     cont.innerHTML=`
