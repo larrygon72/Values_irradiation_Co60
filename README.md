@@ -25,6 +25,145 @@ te dice si estás conectado, sin conexión, o si algo ha fallado.
 
 ---
 
+## 🆕 Versión 2.0 — revisión de seguridad, rendimiento y uso
+
+Esta versión sale de una revisión completa del proyecto (arquitectura,
+lógica, conexiones y diseño). **Todo lo que ya funcionaba sigue igual**:
+mismas pantallas, mismos cálculos, mismos datos y misma API. Lo que cambia
+es lo de debajo — y unas pocas cosas que se ven.
+
+### ⚠️ Al actualizar, haz esto (5 minutos)
+
+1. **Supabase → SQL Editor**: pega y ejecuta de nuevo `supabase/schema.sql`
+   (se puede ejecutar cuantas veces quieras). Añade columnas nuevas,
+   índices y la tabla `auditoria`. Hasta que lo hagas la app sigue
+   funcionando, pero sin las protecciones nuevas.
+2. **Sube el código** a GitHub (Vercel despliega solo).
+3. **Cambia la contraseña de Admin**: si todavía tiene la de fábrica
+   (`Aedes`), al entrar la app te obligará a cambiarla antes de dejarte
+   hacer nada más.
+4. *(Recomendado)* En Vercel comprueba que `AUTH_SECRET` tiene **32
+   caracteres o más** (`openssl rand -base64 48`).
+5. *(Opcional)* Si no quieres que cualquiera con el enlace pueda crearse
+   una cuenta desde el login, añade en Vercel la variable
+   `REGISTRO_ABIERTO=false`: a partir de entonces solo un administrador da
+   de alta usuarios (Administración → Usuarios).
+
+### Seguridad
+
+| Problema encontrado | Qué se ha hecho |
+|---|---|
+| **XSS almacenado**: un texto malicioso en *Observaciones*, en un nombre, matrícula, etc. se ejecutaba en el navegador de quien abriese el Historial, Usuarios… (p. ej. un administrador → robo de sesión). Comprobado en navegador real: 700+ ejecuciones con datos de prueba. | Todo texto que viene de la base de datos se escapa antes de pintarse (`esc()` / `escJs()`); el servidor valida y limpia nombres, nicks, textos y números; y la **CSP** (`vercel.json`) bloquea scripts y conexiones externas. |
+| **Comodines en búsquedas**: un nick como `%` en Eliminar/Editar/Desbloquear afectaba a **todos** los usuarios (incluido `Admin`). Un nick con `_` podía chocar con otro. | Búsquedas literales (`escapeLike`). Nunca se puede eliminar ni degradar al último administrador. |
+| Contraseña de fábrica `Aedes` pública en el repositorio y en el código; usuario Admin local con esa clave y **contraseñas en texto claro** en el navegador (modo sin conexión). | Cambio de contraseña **obligatorio** para cuentas con la clave de fábrica; el almacén local antiguo se borra; sin conexión solo entra quien ya entró antes, guardándose únicamente un *hash* PBKDF2 con sal. |
+| Cualquiera podía **bloquear a Admin** con 3 intentos y dejarlo fuera indefinidamente. | El bloqueo dura 15 min y se levanta solo (un admin puede antes). No expulsa a quien ya tiene sesión. |
+| Tokens válidos 12 h aunque se borrase el usuario, se le cambiase la contraseña o el rol. | El servidor comprueba en cada petición que el usuario sigue existiendo y su rol real; cambiar la contraseña o el rol **cierra sus sesiones**. |
+| Errores internos de la base de datos enviados tal cual al navegador. | Mensajes genéricos con una referencia (`ref. a1b2c3`) para localizar el error en los logs de Vercel. |
+| Tras *Cerrar sesión* el usuario **y la contraseña** seguían en el login (el siguiente en usar el equipo entraba con un clic). | El login se limpia por completo. |
+| Los usuarios **no podían cambiar su propia contraseña** (solo un administrador podía restablecerla). Mínimo de 4 caracteres. | Nuevo **Ajustes → Mi cuenta → Cambiar contraseña**. Contraseña mínima: 8 caracteres (no se aceptan las típicas: `12345678`, `aedes`…). |
+| CSV con «fórmulas» (`=…`, `+…`, `@…`) que Excel ejecuta al abrir. | Se neutralizan en todos los CSV. |
+| Sin registro de quién borra o corrige datos. | Tabla `auditoria` (borrados/ediciones de registros, correcciones de fichajes, cambios de usuarios). Se consulta en Supabase → Table Editor. |
+| JWT sin algoritmo fijado. | Fijado a HS256. |
+
+### Fiabilidad de los datos
+
+- **Ya no se pierden registros en silencio.** Antes, un registro pendiente
+  se *descartaba* si el servidor respondía con cualquier error que no fuese
+  de red (p. ej. sesión caducada). Ahora solo se descarta lo que el
+  servidor rechaza por datos no válidos, y aun así se conserva en el
+  dispositivo (⚠ «rechazado») y se avisa.
+- **Los registros hechos con «sesión sin conexión» nunca llegaban a la
+  nube.** Ahora se encolan y se envían al volver a entrar con internet.
+- **Sin duplicados**: cada registro lleva un identificador único; si el
+  envío llegó pero la respuesta se perdió por mala cobertura, el reintento
+  no lo duplica.
+- **Listados completos**: Supabase devuelve como máximo 1000 filas por
+  consulta; con más datos, Historial e Informes (y sus **totales Σ**)
+  quedaban cortados sin avisar. Ahora se leen todos (hasta 10 000) y se
+  avisa si aún así hay más.
+- Al reabrir la app **se mantiene la sesión** (12 h), y si caduca o se
+  revoca se vuelve al login con un mensaje claro (antes daba errores
+  sueltos).
+- Los registros guardados en un dispositivo compartido solo los ve quien
+  los hizo.
+- El filtro rápido de fechas usaba la fecha UTC: entre las 00:00 y las
+  02:00 de España salía el día anterior.
+- Fichaje: doble toque ya no envía dos peticiones; no se aceptan fechas
+  futuras ni salidas anteriores a la entrada; corregir solo la entrada
+  recalcula las horas de más.
+- Conducción: el km final no puede ser menor que el inicial.
+
+### Velocidad
+
+| | Antes | Ahora |
+|---|---|---|
+| Imágenes de la app | 9,8 MB (logos de 1500×1000 px mostrados a 60 px) | 0,7 MB (0,15 MB en uso normal; el resto son los iconos de instalación) |
+| PDF exportado (1 registro) | **6,1 MB** (logo a tamaño completo, sin comprimir) | **18 KB** |
+| Librerías Excel, PDF y gráficas (~1,5 MB) | se descargaban siempre, desde un CDN externo | solo cuando se usan por primera vez, desde la propia app (funcionan también sin conexión una vez descargadas) |
+| Tipografías | Google Fonts (bloqueaba el arranque; envía la IP a un tercero) | alojadas en `/fonts` |
+| Menú principal | consulta al servidor cada vez que se vuelve | caché de 30 s |
+| Avisos de «nuevo registro» | consulta cada 25 s aunque la app esté oculta | cada 60 s si está oculta |
+| Arranque con mala cobertura | esperaba a la red sin límite | tras 5 s usa la copia guardada |
+| Consultas frecuentes | sin índices | índices en `registros.created_at`, fechas de viajes y repostajes |
+
+### Claridad de uso
+
+- **Guía rápida** en el primer acceso y **Ajustes → Ayuda** con las
+  instrucciones de cada pantalla.
+- **Ajustes** ya es accesible para todos los usuarios en ordenador (antes
+  solo lo veía el administrador), con **Mi cuenta**.
+- El formulario **valida antes de guardar** (solo la fecha es
+  obligatoria), marca el campo con error y te lleva al paso donde está.
+- **Duraciones en h:mm en toda la app** (0:30, 1:20, 7:45, -0:37): Informes
+  (*Horas de más* y *Duración irradiación*: filas, totales Σ, vista previa,
+  CSV y PDF), campo «Duración de la irradiación» del formulario, totales de
+  viaje del Historial, gráfica «Tiempo de irradiación del operador» del
+  Dashboard y Fichaje. Las horas del reloj (entrada, salida, inicio de la
+  ida…) siguen como HH:MM.
+- Aviso **«Hay una versión nueva de la app → Actualizar»**.
+- La ventana «Exportación completada» ya no inventa rutas de archivo.
+- Accesibilidad: foco visible con teclado, Esc cierra los diálogos,
+  avisos leídos por lectores de pantalla, respeta «reducir movimiento»,
+  campos de 16 px en móvil (iOS ya no hace zoom).
+
+### Arquitectura
+
+- Las funciones de `api/` comparten un envoltorio común
+  (`api/_lib/http.js`: método, sesión, errores), validación
+  (`validate.js`), utilidades de base de datos (`db.js`) y auditoría
+  (`audit.js`). Cada endpoint queda con solo su lógica.
+- **Pruebas automáticas**: `npm install && npm test` (25 pruebas de la API
+  con una base de datos simulada, sin necesitar Supabase). En
+  `tests/e2e/` hay pruebas en navegador real (Chromium) —recorrido por
+  todas las pantallas, XSS, sesión, sin conexión, exportaciones, CSP—:
+  `npm i --no-save playwright && npx playwright install chromium` y luego
+  `node --import ./tests/helpers/register.mjs tests/e2e/smoke.e2e.mjs`
+  (también `features.e2e.mjs`, `extras.e2e.mjs` y `xss.e2e.mjs`). Ninguna necesita Supabase.
+- `npm run check` comprueba la sintaxis de todo.
+
+### Limitaciones conocidas / siguientes pasos recomendados
+
+- `js/app.js` sigue siendo un solo archivo grande (~3 500 líneas) y el HTML
+  usa manejadores `onclick` en línea, por lo que la CSP necesita
+  `script-src-attr 'unsafe-inline'`. Lo ideal a medio plazo es dividirlo en
+  módulos y usar `addEventListener`.
+- **Todos los usuarios ven todos los registros** (es el comportamiento de
+  siempre: es un equipo). Si algún día hace falta separar por
+  equipos/obras, habría que añadirlo en la API.
+- La librería SheetJS 0.18.5 (la misma que antes) tiene avisos de
+  seguridad al **leer** archivos de terceros; esta app solo **escribe**
+  Excel, así que no le afecta. Si algún día se añade importar Excel,
+  hay que actualizarla.
+- No hay límite de intentos **por dirección IP** (solo por cuenta): si la
+  app va a estar abierta en internet, activa el *Firewall / Rate Limiting*
+  de Vercel sobre `/api/auth`. El paso «comprobar usuario» del login
+  revela si un nick existe (hace falta para el alta rápida); con
+  `REGISTRO_ABIERTO=false` deja de ser necesario ese comportamiento.
+- Conviene activar en Supabase las copias de seguridad (plan Pro) o
+  exportar la base de datos periódicamente.
+
+---
+
 ## 1. Crear la base de datos en Supabase
 
 1. Entra en **https://supabase.com** → crea un proyecto nuevo (o usa uno
@@ -97,8 +236,8 @@ volverá a desplegar automáticamente la app con los cambios.
 ## 4. Primeras pruebas
 
 1. Abre la URL de Vercel. Entra con usuario **Admin** y contraseña
-   **Aedes**.
-2. Ve a **Ajustes → Gestión de usuarios** y da de alta algún conductor
+   **Aedes**; la app te pedirá **cambiarla en ese mismo momento**.
+2. Ve a **Administración → Usuarios** y da de alta algún conductor
    real: nick, **nombre**, **1er apellido**, (2º apellido opcional) y
    contraseña.
 3. Ve al **Formulario → pestaña TRANSP**: el desplegable "Conductor /
@@ -114,8 +253,9 @@ volverá a desplegar automáticamente la app con los cambios.
 
 ## Cómo funciona la gestión de usuarios
 
-- El usuario **Admin** (contraseña inicial `Aedes`) **no puede ser
-  eliminado por nadie excepto por sí mismo**. Cualquier otro
+- El usuario **Admin** (contraseña inicial `Aedes`, de cambio obligatorio)
+  **no puede ser eliminado por nadie excepto por sí mismo** (y nunca si es
+  el último administrador). Cualquier otro
   administrador que intente borrarlo verá un mensaje de error y, en la
   lista de usuarios, el botón de eliminar se sustituye por un candado
   🔒 "protegido".
@@ -124,42 +264,60 @@ volverá a desplegar automáticamente la app con los cambios.
   admin)— se pide también **nombre y apellidos**, que son los que se
   usan para calcular el código de 3 letras del conductor.
 - Las contraseñas nunca se guardan en texto plano en Supabase: se cifran
-  con *bcrypt* en el servidor antes de guardarlas.
+  con *bcrypt* en el servidor antes de guardarlas. Mínimo 8 caracteres.
+- Tras 3 contraseñas erróneas la cuenta se bloquea **15 minutos** (se
+  desbloquea sola; un administrador puede hacerlo antes desde Usuarios).
+- Cada usuario puede cambiar su contraseña en **Ajustes → Mi cuenta**.
+  Cuando un administrador restablece una contraseña o cambia un rol, las
+  sesiones abiertas de ese usuario se cierran.
+- Para cerrar el alta desde el login: variable `REGISTRO_ABIERTO=false`.
 
 ## Modo sin conexión
 
-Si el dispositivo no tiene internet (o Supabase no está configurado
-todavía), la app **no se bloquea**: seguirá dejando iniciar sesión, dar de
-alta usuarios, elegir conductor y guardar registros, usando el
-almacenamiento local del navegador — tal y como funcionaba la versión
-original. En cuanto vuelva la conexión:
-- Los registros guardados mientras estabas sin conexión se sincronizan
-  solos con Supabase (lo verás en la pantalla de Registros como "⏳
-  pendiente" y luego "☁ sincronizado").
-- Los usuarios y conductores dados de alta sin conexión quedan solo en
-  ese dispositivo hasta que se puedan volver a crear con conexión (esto
-  es una limitación conocida: sin servidor no hay forma segura de repartir
-  esas altas a otros dispositivos).
+Si el dispositivo no tiene internet, la app **no se bloquea**:
+
+- **Guardar registros**: se guardan en el dispositivo y aparecen como «⏳
+  pendiente». En cuanto vuelve la conexión se envían solos a Supabase
+  (una sola vez, sin duplicados) y pasan a «☁ sincronizado».
+- **Entrar**: solo pueden entrar sin conexión las personas que **ya hayan
+  iniciado sesión con internet en ese mismo dispositivo**. La sesión sin
+  conexión no tiene permisos de administrador y no consulta la nube. Tras
+  5 contraseñas erróneas se espera 5 minutos.
+- **No se puede** sin conexión: crear cuentas, fichar, ver el Historial de
+  la nube, administrar usuarios (la hora del fichaje la pone el servidor
+  para que sea fiable).
+- La app arranca sin conexión gracias al Service Worker, y las librerías
+  de Excel/PDF/gráficas funcionan si se han usado antes.
+
+*(Hasta la versión 1.x existía un modo «local» que permitía crear usuarios
+sin conexión y guardaba contraseñas en el navegador; se ha retirado por
+seguridad.)*
 
 ## Estructura de archivos añadidos/modificados
 
 ```
-index.html          → pantallas: login con alta (nombre/apellidos),
-                       indicador de nube, desplegable de conductor,
-                       gestión de usuarios ampliada
-css/app.css          → estilos nuevos (indicador de nube, formulario de alta)
-js/app.js            → toda la lógica original intacta + capa de nube
-                       (login/registro, sync de registros, gestión de
-                       usuarios, código de conductor)
-api/auth.js           → comprobar usuario / registrar / login
-api/usuarios.js       → listar, crear, eliminar, desbloquear usuarios
-api/registros.js      → guardar y listar registros en Supabase
-api/_lib/              → utilidades compartidas (token de sesión, cliente
-                       de Supabase con permisos de servidor)
-supabase/schema.sql   → esquema completo de la base de datos
+index.html            → pantallas, diálogos, guía rápida y ayuda
+css/app.css           → estilos + tipografías propias (@font-face)
+js/app.js             → lógica de la app (cálculos, formularios, nube,
+                        sesión, sincronización, exportaciones)
+sw.js                 → Service Worker (arranque rápido y sin conexión)
+manifest.json         → instalación como app (PWA)
+api/auth.js           → comprobar usuario / registrar / login / cambiar contraseña
+api/usuarios.js       → listar, crear, editar, eliminar, desbloquear usuarios
+api/registros.js      → guardar, listar, editar, eliminar registros
+api/fichajes.js       → control horario
+api/conduccion.js     → viajes y repostajes
+api/irradiadores.js, vehiculos.js, estaciones.js → catálogos
+api/_lib/             → http.js (envoltorio común), auth.js (sesión),
+                        validate.js, db.js, audit.js, supabaseAdmin.js
+supabase/schema.sql   → esquema completo (re-ejecutable)
+vendor/               → Chart.js, SheetJS y jsPDF (con sus licencias)
+fonts/                → Manrope, Inter e IBM Plex Mono (licencia OFL)
+img/                  → logos e iconos (optimizados)
+tests/                → pruebas de la API (npm test) y de navegador (e2e/)
 package.json          → dependencias de las funciones de Vercel
-vercel.json           → cabeceras de seguridad
-.env.example          → referencia de variables de entorno necesarias
+vercel.json           → cabeceras de seguridad, CSP y caché
+.env.example          → variables de entorno necesarias
 ```
 
 ## Historial de registros (nube, filtrado y exportable)
@@ -176,7 +334,7 @@ que consulta directamente Supabase (no el almacenamiento local):
   resultados de la búsqueda por fechas.
 - **Exportar** el resultado filtrado a **CSV**, **Excel (.xlsx)** o
   **PDF** con un botón — usa las mismas librerías (SheetJS y jsPDF,
-  cargadas desde CDN) y el mismo diálogo de confirmación "Exportación
+  cargadas bajo demanda desde la carpeta `vendor/`) y el mismo diálogo de confirmación "Exportación
   completada" que ya usaba el resto de la app.
 - Cada registro muestra quién lo guardó. Se puede **eliminar**: cualquier
   usuario puede borrar los que él mismo guardó, y un **Admin puede borrar
@@ -235,7 +393,7 @@ desplegable) sobre los registros que tengas filtrados en ese momento:
 - **Registros por semana** (para ver el volumen de trabajo)
 
 Las gráficas se generan con [Chart.js](https://www.chartjs.org/) cargado
-desde CDN, y se redibujan solas si cambias los filtros mientras estás en
+bajo demanda desde la propia app (`vendor/`), y se redibujan solas si cambias los filtros mientras estás en
 esa vista.
 
 ## Notificaciones: "alguien ha guardado un registro"

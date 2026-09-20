@@ -90,6 +90,9 @@ alter table registros enable row level security;
 -- ── USUARIO ADMIN POR DEFECTO ────────────────────────────────
 -- nick: Admin · contraseña: Aedes
 -- (el hash de abajo corresponde exactamente a la contraseña "Aedes")
+-- ¡Solo sirve para el primer acceso! Al final de este archivo (bloque de
+-- SEGURIDAD) se marca para que la app obligue a cambiar esa contraseña nada
+-- más entrar, y no deja hacer nada más hasta que se cambie.
 -- Este usuario NO se puede borrar excepto por sí mismo (esa regla vive
 -- en /api/usuarios.js, a nivel de código, igual que en la app original).
 insert into usuarios (nick, password_hash, nombre, apellido1, apellido2, role, locked, intentos)
@@ -334,3 +337,60 @@ begin
     alter table fichajes drop column horas_de_mas_old;
   end if;
 end $$;
+
+-- ════════════════════════════════════════════════════════════
+-- AMPLIACIÓN — Seguridad, fiabilidad y trazabilidad
+-- (todo con IF NOT EXISTS: se puede ejecutar varias veces sin problema)
+-- ════════════════════════════════════════════════════════════
+
+-- ── Usuarios: cambio obligatorio de contraseña, bloqueo temporal y
+--    revocación de sesiones ──────────────────────────────────────────
+-- must_change_password -> la app obliga a elegir una contraseña nueva antes
+--                         de dejar hacer nada más (se usa con el Admin de fábrica).
+-- bloqueado_hasta      -> tras 3 contraseñas erróneas la cuenta se bloquea 15
+--                         minutos y se desbloquea sola (un admin puede antes).
+--                         Un bloqueo sin fecha (versiones antiguas) sigue siendo
+--                         permanente hasta que un admin lo quite.
+-- token_version        -> sube cada vez que se cambia la contraseña o el rol,
+--                         y así se cierran las sesiones abiertas de ese usuario.
+alter table usuarios add column if not exists must_change_password boolean not null default false;
+alter table usuarios add column if not exists bloqueado_hasta timestamptz;
+alter table usuarios add column if not exists token_version int not null default 0;
+
+-- Cualquier cuenta que TODAVÍA tenga la contraseña de fábrica ("Aedes") queda
+-- marcada para cambiarla. (El hash es el del alta inicial de más arriba: en
+-- cuanto alguien cambia la contraseña, el hash es otro y esto ya no le afecta.)
+update usuarios
+   set must_change_password = true
+ where password_hash = '$2b$10$g3dxTMRKRu9jRJcc4d/Mi.IoeqRQlMYSBpmttJshwdHjEbf9u0.xm'
+   and must_change_password = false;
+
+-- ── Registros: protección contra duplicados al reintentar ────────────
+-- Si la conexión falla justo al guardar, el navegador reenvía el registro
+-- con el mismo identificador (client_uid) y el servidor lo reconoce en vez
+-- de guardarlo dos veces.
+alter table registros add column if not exists client_uid text;
+create unique index if not exists registros_client_uid_idx on registros (creado_por, client_uid) where client_uid is not null;
+
+-- ── Índices para que todo siga siendo rápido cuando haya muchos datos ──
+-- (created_at: el aviso de "alguien ha guardado un registro" pregunta cada
+--  pocos segundos por lo último que se ha guardado)
+create index if not exists registros_created_at_idx on registros (created_at desc);
+create index if not exists vehiculo_viajes_fecha_idx on vehiculo_viajes (fecha desc);
+create index if not exists repostajes_fecha_idx on repostajes (fecha desc);
+
+-- ── TABLA: auditoria ─────────────────────────────────────────────────
+-- Quién hizo qué y cuándo: borrados y ediciones de registros, correcciones
+-- de fichajes, altas/bajas/cambios de usuarios, cambios de contraseña (sin
+-- guardar nunca la contraseña). Se consulta desde Supabase → Table Editor.
+create table if not exists auditoria (
+  id           bigint generated always as identity primary key,
+  created_at   timestamptz not null default now(),
+  usuario_nick text,
+  accion       text not null,
+  entidad      text not null,
+  entidad_id   text,
+  detalle      jsonb
+);
+create index if not exists auditoria_created_at_idx on auditoria (created_at desc);
+alter table auditoria enable row level security;

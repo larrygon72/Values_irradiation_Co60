@@ -14,14 +14,15 @@
 <meta name="apple-mobile-web-app-title" content="Irradiation">
 <link rel="apple-touch-icon" href="img/icon-192.png">
 
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="icon" type="image/png" href="img/mosquito_icon.png">
+<meta name="description" content="Gestión de dosimetría radiológica, conducción y fichaje — irradiación con Cobalto-60">
+<!-- Tipografías propias (carpeta /fonts): se precargan las dos de uso general para evitar el "salto" al cargar -->
+<link rel="preload" href="fonts/manrope-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="icon" type="image/png" href="img/favicon-64.png">
 <link rel="stylesheet" href="css/app.css">
-<!-- Librerías para exportar el Historial a Excel y PDF (se cargan bajo demanda desde el navegador, no afectan al resto de la app) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js" defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js" defer></script>
+<!-- Las librerías de gráficas (Chart.js), Excel (SheetJS) y PDF (jsPDF) están en /vendor y NO se
+     cargan aquí: js/app.js las pide solo cuando se usan por primera vez (cargarLib). Así la app arranca
+     mucho más rápido y esas librerías funcionan también sin conexión una vez descargadas. -->
 </head>
 <body>
 <div id="app">
@@ -89,6 +90,13 @@
         <span>Informes</span>
       </button>
     </div>
+    <div class="sidebar-group">
+      <div class="sidebar-group-lbl">Cuenta</div>
+      <button class="sidebar-link" data-nav="settings" onclick="go('settings')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09A1.65 1.65 0 0015 4.6a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9c.14.31.22.65.23 1H21a2 2 0 010 4h-.09c-.14.31-.22.65-.23 1z"/></svg>
+        <span>Ajustes</span>
+      </button>
+    </div>
     <div class="sidebar-group" id="sidebarAdmin" style="display:none">
       <div class="sidebar-group-lbl">Administración</div>
       <button class="sidebar-link" data-nav="users" onclick="go('users')">
@@ -106,10 +114,6 @@
       <button class="sidebar-link" data-nav="estaciones" onclick="go('estaciones')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 22V5a2 2 0 012-2h8a2 2 0 012 2v17M3 22h12M8 10h2M14 8l3 3v6a1.5 1.5 0 003 0v-4l-2-2"/></svg>
         <span>Estaciones</span>
-      </button>
-      <button class="sidebar-link" data-nav="settings" onclick="go('settings')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09A1.65 1.65 0 0015 4.6a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9c.14.31.22.65.23 1H21a2 2 0 010 4h-.09c-.14.31-.22.65-.23 1z"/></svg>
-        <span>Ajustes</span>
       </button>
     </div>
   </nav>
@@ -129,7 +133,7 @@
 
 <!-- TOAST -->
 <!-- ══════════ CONFIRMACIÓN (reemplaza al confirm() nativo del navegador) ══════════ -->
-<div class="rdiag" id="confirmOv">
+<div class="rdiag" id="confirmOv" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
   <div class="rbox" style="max-width:340px;text-align:left">
     <h3 id="confirmTitle" style="text-align:center;text-transform:none;letter-spacing:.02em">Confirmar</h3>
     <p id="confirmMsg" style="font-size:14px;color:var(--txt2);margin:10px 0 22px;line-height:1.5;text-align:center"></p>
@@ -140,8 +144,27 @@
   </div>
 </div>
 
+<!-- ══════════ CAMBIAR CONTRASEÑA ══════════ -->
+<div class="rdiag" id="passOv" role="dialog" aria-modal="true" aria-labelledby="passTitle">
+  <div class="rbox pass-box">
+    <h3 id="passTitle">Cambiar contraseña</h3>
+    <p class="pass-msg" id="passMsg">Elige una contraseña nueva de al menos 8 caracteres.</p>
+    <div class="lerr" id="passErr" role="alert"></div>
+    <div class="fl"><label for="passActual">Contraseña actual</label>
+      <input type="password" id="passActual" autocomplete="current-password"></div>
+    <div class="fl"><label for="passNueva">Contraseña nueva</label>
+      <input type="password" id="passNueva" autocomplete="new-password"></div>
+    <div class="fl"><label for="passNueva2">Repite la contraseña nueva</label>
+      <input type="password" id="passNueva2" autocomplete="new-password" onkeydown="if(event.key==='Enter')guardarCambioPass()"></div>
+    <div style="display:flex;gap:10px;margin-top:6px">
+      <button class="btn bo" style="flex:1;min-width:0" id="passCancelBtn" onclick="cerrarCambioPass()">Cancelar</button>
+      <button class="btn bp" style="flex:1;min-width:0" id="passOkBtn" onclick="guardarCambioPass()">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════ DETALLE DE REGISTRO ══════════ -->
-<div class="ov" id="detOv">
+<div class="ov" id="detOv" role="dialog" aria-modal="true" aria-label="Detalle del registro">
   <div class="modal" style="max-width:640px">
     <div class="mhd">
       <div>
@@ -160,10 +183,16 @@
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!-- Aviso de nueva versión de la app -->
+<div class="upd-bar" id="updBar" role="alert">
+  <span>🔄 Hay una versión nueva de la app.</span>
+  <button class="btn bp bs" onclick="location.reload()">Actualizar</button>
+</div>
 
 <!-- RESULT DIALOG -->
-<div class="rdiag" id="rdiag">
+<div class="rdiag" id="rdiag" role="dialog" aria-modal="true" aria-label="Tiempo de irradiación">
   <div class="rbox">
     <h3>Tiempo de irradiación</h3>
     <div class="rbig" id="rTime">—</div>
@@ -174,7 +203,7 @@
 </div>
 
 <!-- EXPORT FORMAT DIALOG -->
-<div class="exov" id="exov">
+<div class="exov" id="exov" role="dialog" aria-modal="true" aria-label="Exportar datos">
   <div class="exbox">
     <div class="exhd">
       <span style="font-size:22px">📦</span>
@@ -203,7 +232,7 @@
 </div>
 
 <!-- SAVE CONFIRM DIALOG -->
-<div class="scov" id="scov">
+<div class="scov" id="scov" role="dialog" aria-modal="true" aria-label="Exportación completada">
   <div class="scbox">
     <div class="schd"><span style="font-size:24px">✅</span><h3>Exportación completada</h3></div>
     <div class="scbdy">
@@ -221,7 +250,7 @@
 </div>
 
 <!-- URNAS MODAL -->
-<div class="ov" id="urnaModal">
+<div class="ov" id="urnaModal" role="dialog" aria-modal="true" aria-label="Registro de urnas">
   <div class="modal">
     <div class="mhd">
       <div style="display:flex;flex-direction:column;gap:6px;flex:1">
@@ -312,7 +341,7 @@
         <div class="fl"><label>1er apellido</label><input type="text" id="rAp1" placeholder="Primer apellido"></div>
       </div>
       <div class="fl"><label>2º apellido (opcional)</label><input type="text" id="rAp2" placeholder="Segundo apellido"></div>
-      <div class="fl"><label>Crea una contraseña</label><input type="password" id="rPass" placeholder="Contraseña" autocomplete="new-password"></div>
+      <div class="fl"><label>Crea una contraseña</label><input type="password" id="rPass" placeholder="Mínimo 8 caracteres" autocomplete="new-password"></div>
       <div class="fl"><label>Confirma la contraseña</label><input type="password" id="rPass2" placeholder="Repite la contraseña" autocomplete="new-password" onkeydown="if(event.key==='Enter')lRegister()"></div>
     </div>
     <button class="btn bt bw" id="lbtn" onclick="lStep()">Continuar</button>
@@ -350,6 +379,18 @@
       Nuevo registro
     </button>
 
+    <div class="help-card" id="helpCard" style="display:none">
+      <button class="help-x" onclick="cerrarGuiaRapida()" aria-label="Cerrar la guía rápida">✕</button>
+      <h3>👋 Guía rápida</h3>
+      <ul>
+        <li><b>Nuevo registro</b>: rellena los 5 pasos y pulsa <b>Guardar</b>. Solo la fecha es obligatoria; lo demás puedes completarlo después desde <b>Historial → Editar</b>.</li>
+        <li><b>Sin internet</b>: el registro se guarda en tu dispositivo y se envía solo cuando vuelva la conexión (verás «Pendientes de sincronizar»).</li>
+        <li><b>Historial e Informes</b>: busca, filtra y exporta a CSV, Excel o PDF.</li>
+        <li><b>Fichaje</b> y <b>Conducción</b>: en el menú <b>Más</b> (móvil) o en la barra lateral (ordenador).</li>
+      </ul>
+      <div class="lft" style="text-align:left;margin-top:8px">Tienes la guía completa en <b>Ajustes → Ayuda</b>.</div>
+    </div>
+
     <div class="kpi-grid">
       <div class="kpi-card">
         <div class="kpi-lbl">Dosis configurada</div>
@@ -383,7 +424,7 @@
           <option value="urnas">Nº de urnas</option>
           <option value="temp">Temperatura media (°C)</option>
           <option value="expUsv">Exposición del operador (µSv)</option>
-          <option value="tiempoOperador">Tiempo de irradiación del operador (min)</option>
+          <option value="tiempoOperador">Tiempo de irradiación del operador (h:mm)</option>
           <option value="texpReal">Tiempo de exposición real (s)</option>
         </select>
       </div>
@@ -524,7 +565,7 @@
             <div class="fl"><label>H. inicio irradiación</label><input type="time" id="fHini" oninput="calcDuracionIrr()"></div>
             <div class="fl"><label>H. fin irradiación</label><input type="time" id="fHfin" oninput="calcDuracionIrr()"></div>
           </div>
-          <div class="fl auto-fl"><label>⚙ Duración de la irradiación</label>
+          <div class="fl auto-fl"><label>⚙ Duración de la irradiación (h:mm)</label>
             <div class="cfr"><input type="text" id="fDuracionIrr" readonly placeholder="—"><span class="aut">auto</span></div></div>
           <div class="fl"><label>Exposición (µSv)</label>
             <input type="number" id="fExpUsv" placeholder="Lectura del dosímetro en µSv" min="0" step="0.01"></div>
@@ -606,9 +647,9 @@
 
     <div class="resumen-dosis" id="histTotalesWrap" style="display:none;grid-template-columns:1fr 1fr">
       <div class="resumen-card"><div class="resumen-lbl">Exposición total</div><div class="resumen-val" id="totExpUsv">—</div><div class="resumen-unit">µSv</div></div>
-      <div class="resumen-card"><div class="resumen-lbl">Tiempo de viaje total</div><div class="resumen-val" id="totViaje" style="font-size:15px">—</div><div class="resumen-unit">ida + vuelta</div></div>
-      <div class="resumen-card"><div class="resumen-lbl">Tiempo total de ida</div><div class="resumen-val" id="totIda" style="font-size:15px">—</div><div class="resumen-unit">&nbsp;</div></div>
-      <div class="resumen-card"><div class="resumen-lbl">Tiempo total de vuelta</div><div class="resumen-val" id="totVuelta" style="font-size:15px">—</div><div class="resumen-unit">&nbsp;</div></div>
+      <div class="resumen-card"><div class="resumen-lbl">Tiempo de viaje total</div><div class="resumen-val" id="totViaje" style="font-size:15px">—</div><div class="resumen-unit">h:mm · ida + vuelta</div></div>
+      <div class="resumen-card"><div class="resumen-lbl">Tiempo total de ida</div><div class="resumen-val" id="totIda" style="font-size:15px">—</div><div class="resumen-unit">h:mm</div></div>
+      <div class="resumen-card"><div class="resumen-lbl">Tiempo total de vuelta</div><div class="resumen-val" id="totVuelta" style="font-size:15px">—</div><div class="resumen-unit">h:mm</div></div>
     </div>
 
     <div style="display:flex;gap:8px">
@@ -706,7 +747,7 @@
 </div>
 
 <!-- ══════════ SELECTOR DE CAMPOS (Informes) ══════════ -->
-<div class="ov" id="camposOv">
+<div class="ov" id="camposOv" role="dialog" aria-modal="true" aria-label="Campos a incluir">
   <div class="modal" style="max-width:480px">
     <div class="mhd">
       <div>
@@ -802,7 +843,18 @@
   </div>
   <div class="sa" style="display:flex;flex-direction:column;gap:16px">
     <div class="ssc">
+      <h3>Mi cuenta</h3>
+      <div class="acct-row">
+        <span>Usuario: <strong id="acctNick">—</strong> · <span id="acctRol">—</span></span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+        <button class="btn bo bs" onclick="abrirCambioPass(false)">🔑 Cambiar contraseña</button>
+        <button class="btn bo bs" onclick="confirmLogout()">Cerrar sesión</button>
+      </div>
+    </div>
+    <div class="ssc">
       <h3>Dosis activa</h3>
+      <p class="thhint">Es la dosis (Gy) que usan los cálculos de tiempo. Se guarda solo en este dispositivo.</p>
       <div class="fl"><label>Dosis (Gy)</label>
         <input type="number" id="sdose" value="70" min="1" step="1"></div>
       <button class="btn bt bw" onclick="saveDose()">Actualizar dosis</button>
@@ -830,6 +882,56 @@
         <button class="btn bt bs" id="notifBtn" style="display:none" onclick="pedirPermisoNotificaciones()">🔔 Activar</button>
       </div>
     </div>
+    <div class="ssc" id="ayudaSec">
+      <h3>Ayuda</h3>
+      <details class="help-det" open>
+        <summary>Cómo guardar un registro</summary>
+        <ul class="help-list">
+          <li>Pulsa <b>Nuevo registro</b> (o <b>Nuevo</b> abajo en el móvil).</li>
+          <li>Recorre los pasos: <b>Datos</b> (fecha y urnas) → <b>Transporte</b> → <b>Temperatura</b> → <b>Irradiación</b> → <b>Obs.</b> Los campos con ⚙ se calculan solos.</li>
+          <li>Pulsa <b>Guardar</b>. Solo la <b>fecha de irradiación</b> es obligatoria: el resto puede completarse más tarde.</li>
+          <li>Para corregir un registro: <b>Historial</b> → toca el registro → <b>Editar</b>. Solo puedes editar y borrar los tuyos (un administrador puede con todos).</li>
+        </ul>
+      </details>
+      <details class="help-det">
+        <summary>Qué pasa si no hay internet</summary>
+        <ul class="help-list">
+          <li>Los registros se guardan en tu dispositivo y aparecen como <b>⏳ pendiente</b>; se envían solos en cuanto vuelve la conexión.</li>
+          <li>Sin internet no se puede fichar ni consultar el Historial: la hora del fichaje la pone el servidor para que sea fiable.</li>
+          <li>Para entrar sin conexión tienes que haber iniciado sesión antes, con internet, en este mismo dispositivo.</li>
+        </ul>
+      </details>
+      <details class="help-det">
+        <summary>Historial, Informes y exportar</summary>
+        <ul class="help-list">
+          <li><b>Historial</b>: busca por texto, filtra por fechas, conductor, irradiador o estado, y exporta lo que estás viendo (CSV, Excel, PDF).</li>
+          <li><b>Informes</b>: elige el tipo (registros o fichajes), los campos (con <b>Σ suma</b> para totales), el periodo y revisa la vista previa antes de exportar. Las duraciones (horas de más, duración de la irradiación) se muestran en formato <b>h:mm</b>, por ejemplo 0:30.</li>
+        </ul>
+      </details>
+      <details class="help-det">
+        <summary>Fichaje</summary>
+        <ul class="help-list">
+          <li>Pulsa <b>Fichar entrada</b> al llegar y <b>Fichar salida</b> al irte. Las horas de más se calculan según tu horario (fijo o flexible).</li>
+          <li>Si olvidaste fichar, usa <b>Corregir un fichaje</b> en esa misma pantalla y elige el día.</li>
+        </ul>
+      </details>
+      <details class="help-det">
+        <summary>Conducción</summary>
+        <ul class="help-list">
+          <li>Registra <b>viajes</b> (km inicial y final) y <b>repostajes</b>. El km inicial se rellena solo con el último km final del vehículo.</li>
+          <li>Si tu vehículo o estación no aparece, elige <b>+ Añadir…</b> al final del desplegable.</li>
+        </ul>
+      </details>
+      <details class="help-det">
+        <summary>Contraseña y seguridad</summary>
+        <ul class="help-list">
+          <li>Cambia tu contraseña en <b>Mi cuenta</b> (arriba). Debe tener al menos 8 caracteres.</li>
+          <li>Tras 3 contraseñas erróneas la cuenta se bloquea 15 minutos (o hasta que un administrador la desbloquee).</li>
+          <li>Al terminar en un dispositivo compartido, pulsa <b>Cerrar sesión</b>.</li>
+        </ul>
+      </details>
+      <div class="lft" style="margin-top:10px" id="appVersionNote"></div>
+    </div>
   </div>
 </div>
 
@@ -843,14 +945,15 @@
     <div class="ssc" id="admSec">
       <h3>Dar de alta un usuario</h3>
       <div class="fl"><label>Usuario (nick)</label>
-        <input type="text" id="nusr" placeholder="Ej. jnavarro"></div>
+        <input type="text" id="nusr" placeholder="Ej. jnavarro" autocomplete="off">
+        <span class="fhint">2-40 caracteres: letras, números, espacios, punto, guion o guion bajo.</span></div>
       <div class="fr2">
         <div class="fl"><label>Nombre</label><input type="text" id="nnombre" placeholder="Nombre"></div>
         <div class="fl"><label>1er apellido</label><input type="text" id="nap1" placeholder="Primer apellido"></div>
       </div>
       <div class="fl"><label>2º apellido (opcional)</label><input type="text" id="nap2" placeholder="Segundo apellido"></div>
       <div class="fl"><label>Contraseña</label>
-        <input type="password" id="npass" placeholder="Contraseña"></div>
+        <input type="password" id="npass" placeholder="Mínimo 8 caracteres" autocomplete="new-password"></div>
       <div class="fl"><label>Rol</label>
         <select id="nrole"><option value="user">Usuario</option><option value="admin">Admin</option></select></div>
       <div class="fr2">

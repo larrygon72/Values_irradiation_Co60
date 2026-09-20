@@ -6,12 +6,6 @@
 // horaria de España (Europe/Madrid) — si el complejo/equipo trabajase en
 // otra zona horaria, cambia MADRID_TZ más abajo.
 //
-// La hora de entrada y de salida se toman SIEMPRE del reloj del SERVIDOR
-// (no del dispositivo del usuario), para que sean fiables. El servidor de
-// Vercel corre en UTC, así que se formatean explícitamente en la zona
-// horaria de España (Europe/Madrid) — si el complejo/equipo trabajase en
-// otra zona horaria, cambia MADRID_TZ más abajo.
-//
 // Cada usuario tiene un TIPO DE HORARIO ("usuarios.tipo_horario"):
 //  · "fijo"     -> solo importa la hora de SALIDA. Se compara contra el
 //                  horario de salida esperado, con 15 minutos de cortesía:
@@ -48,30 +42,34 @@
 //                           indicando "usuarioNick".
 // action:"eliminar"      -> borra un fichaje. Solo admin.
 
-import { getSupabaseAdmin } from "./_lib/supabaseAdmin.js";
-import { verificarToken } from "./_lib/auth.js";
+import { apiHandler, ErrorHttp, exigirAdmin } from "./_lib/http.js";
+import { igualCI, leerTodo, esViolacionUnica } from "./_lib/db.js";
+import { esFecha, esHora, uuid } from "./_lib/validate.js";
+import { auditar } from "./_lib/audit.js";
 
 const MADRID_TZ = "Europe/Madrid";
-const HORA_VALIDA = /^([01]\d|2[0-3]):[0-5]\d$/; // "HH:MM"
 export const GRACIA_SALIDA_MIN = 15; // minutos de cortesía alrededor del horario de salida, solo para horario "fijo"
 
-export function horaAhoraMadrid() {
-  return new Intl.DateTimeFormat("es-ES", {
+export function horaAhoraMadrid(ahora = new Date()) {
+  const partes = new Intl.DateTimeFormat("en-GB", {
     timeZone: MADRID_TZ,
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false,
-  }).format(new Date());
+    hourCycle: "h23",
+  }).formatToParts(ahora);
+  const get = (t) => partes.find((p) => p.type === t).value;
+  const h = get("hour") === "24" ? "00" : get("hour"); // algunas versiones de ICU devuelven "24" a medianoche
+  return `${h}:${get("minute")}`;
 }
 // YYYY-MM-DD en la zona horaria de Madrid (no en UTC — importante cerca de
 // medianoche, donde la fecha en UTC ya podría ser la del día siguiente).
-export function fechaHoyMadrid() {
+export function fechaHoyMadrid(ahora = new Date()) {
   const partes = new Intl.DateTimeFormat("en-CA", {
     timeZone: MADRID_TZ,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).formatToParts(new Date());
+  }).formatToParts(ahora);
   const get = (t) => partes.find((p) => p.type === t).value;
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
@@ -104,210 +102,216 @@ export function calcularHorasDeMas(tipoHorario, horaEntradaReal, horaSalidaReal,
   return diffMin / 60;
 }
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Método no permitido" });
+// Horario y tipo de jornada de un usuario (con los valores por defecto de siempre).
+async function horarioDe(supabase, nick) {
+  const { data, error } = await igualCI(
+    supabase.from("usuarios").select("nick, horario_entrada, horario_salida, tipo_horario"),
+    "nick",
+    nick
+  ).maybeSingle();
+  if (error) throw error;
+  return {
+    existe: !!data,
+    nick: data?.nick || nick,
+    horarioEntrada: data?.horario_entrada || "07:00",
+    horarioSalida: data?.horario_salida || "13:57",
+    tipoHorario: data?.tipo_horario || "fijo",
+  };
+}
+
+async function fichajeDe(supabase, nick, fecha, columnas = "*") {
+  const { data, error } = await igualCI(supabase.from("fichajes").select(columnas), "usuario_nick", nick).eq("fecha", fecha).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+export default apiHandler(async ({ res, action, payload, sesion, supabase }) => {
+  // ── HOY ───────────────────────────────────────────────
+  if (action === "hoy") {
+    const hoy = fechaHoyMadrid();
+    const [fichaje, h] = await Promise.all([fichajeDe(supabase, sesion.nick, hoy), horarioDe(supabase, sesion.nick)]);
+    return res.status(200).json({
+      fichaje: fichaje || null,
+      horarioEntrada: h.horarioEntrada,
+      horarioSalida: h.horarioSalida,
+      tipoHorario: h.tipoHorario,
+    });
   }
 
-  const { action, token, payload } = req.body || {};
-  const sesion = verificarToken(token);
-  if (!sesion) return res.status(401).json({ error: "Sesión no válida o caducada" });
-
-  let supabase;
-  try {
-    supabase = getSupabaseAdmin();
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-
-  try {
-    // ── HOY ───────────────────────────────────────────────
-    if (action === "hoy") {
-      const hoy = fechaHoyMadrid();
-      const [{ data: fichaje, error: errF }, { data: usuario, error: errU }] = await Promise.all([
-        supabase.from("fichajes").select("*").ilike("usuario_nick", sesion.nick).eq("fecha", hoy).maybeSingle(),
-        supabase.from("usuarios").select("horario_entrada, horario_salida, tipo_horario").ilike("nick", sesion.nick).maybeSingle(),
-      ]);
-      if (errF) throw errF;
-      if (errU) throw errU;
-      return res.status(200).json({
-        fichaje: fichaje || null,
-        horarioEntrada: usuario?.horario_entrada || "07:00",
-        horarioSalida: usuario?.horario_salida || "13:57",
-        tipoHorario: usuario?.tipo_horario || "fijo",
-      });
-    }
-
-    // ── FICHAR ENTRADA ────────────────────────────────────
-    if (action === "ficharEntrada") {
-      const hoy = fechaHoyMadrid();
-      const { data: existente, error: errE } = await supabase
-        .from("fichajes").select("id, hora_entrada").ilike("usuario_nick", sesion.nick).eq("fecha", hoy).maybeSingle();
-      if (errE) throw errE;
-      if (existente?.hora_entrada) {
-        return res.status(400).json({ error: "Ya has fichado la entrada hoy" });
-      }
-      const horaActual = horaAhoraMadrid();
-      let fichaje;
-      if (existente) {
-        const { data, error } = await supabase.from("fichajes")
-          .update({ hora_entrada: horaActual, updated_at: new Date().toISOString() })
-          .eq("id", existente.id).select("*").single();
-        if (error) throw error;
-        fichaje = data;
-      } else {
-        const { data, error } = await supabase.from("fichajes")
-          .insert({ usuario_nick: sesion.nick, fecha: hoy, hora_entrada: horaActual })
-          .select("*").single();
-        if (error) throw error;
-        fichaje = data;
-      }
-      return res.status(200).json({ ok: true, fichaje });
-    }
-
-    // ── FICHAR SALIDA ─────────────────────────────────────
-    if (action === "ficharSalida") {
-      const hoy = fechaHoyMadrid();
-      const { data: existente, error: errE } = await supabase
-        .from("fichajes").select("id, hora_entrada, hora_salida").ilike("usuario_nick", sesion.nick).eq("fecha", hoy).maybeSingle();
-      if (errE) throw errE;
-      if (!existente?.hora_entrada) {
-        return res.status(400).json({ error: "Todavía no has fichado la entrada hoy" });
-      }
-      if (existente.hora_salida) {
-        return res.status(400).json({ error: "Ya has fichado la salida hoy" });
-      }
-      const { data: usuario, error: errU } = await supabase
-        .from("usuarios").select("horario_entrada, horario_salida, tipo_horario").ilike("nick", sesion.nick).maybeSingle();
-      if (errU) throw errU;
-      const horaActual = horaAhoraMadrid();
-      const horarioEntrada = usuario?.horario_entrada || "07:00";
-      const horarioSalida = usuario?.horario_salida || "13:57";
-      const tipoHorario = usuario?.tipo_horario || "fijo";
-      const { data: fichaje, error } = await supabase.from("fichajes")
-        .update({
-          hora_salida: horaActual,
-          horario_entrada_esperado: horarioEntrada,
-          horario_salida_esperado: horarioSalida,
-          tipo_horario_aplicado: tipoHorario,
-          horas_de_mas: calcularHorasDeMas(tipoHorario, existente.hora_entrada, horaActual, horarioEntrada, horarioSalida),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", existente.id).select("*").single();
-      if (error) throw error;
-      return res.status(200).json({ ok: true, fichaje });
-    }
-
-    // ── RESUMEN DEL MES EN CURSO ──────────────────────────
-    if (action === "resumenMes") {
-      const hoy = fechaHoyMadrid();
-      const inicioMes = hoy.slice(0, 8) + "01";
+  // ── FICHAR ENTRADA ────────────────────────────────────
+  if (action === "ficharEntrada") {
+    const hoy = fechaHoyMadrid();
+    const existente = await fichajeDe(supabase, sesion.nick, hoy, "id, hora_entrada");
+    if (existente?.hora_entrada) throw new ErrorHttp(400, "Ya has fichado la entrada hoy");
+    const horaActual = horaAhoraMadrid();
+    let fichaje;
+    if (existente) {
       const { data, error } = await supabase
         .from("fichajes")
+        .update({ hora_entrada: horaActual, updated_at: new Date().toISOString() })
+        .eq("id", existente.id)
         .select("*")
-        .ilike("usuario_nick", sesion.nick)
-        .gte("fecha", inicioMes)
-        .lte("fecha", hoy)
-        .order("fecha", { ascending: false });
+        .single();
       if (error) throw error;
-      const totalHorasDeMas = (data || []).reduce((acc, f) => acc + (parseFloat(f.horas_de_mas) || 0), 0);
-      return res.status(200).json({ fichajes: data || [], totalHorasDeMas });
+      fichaje = data;
+    } else {
+      const { data, error } = await supabase
+        .from("fichajes")
+        .insert({ usuario_nick: sesion.nick, fecha: hoy, hora_entrada: horaActual })
+        .select("*")
+        .single();
+      // Doble toque / dos dispositivos a la vez: el índice único lo impide, y aquí se explica bien.
+      if (esViolacionUnica(error)) throw new ErrorHttp(400, "Ya has fichado la entrada hoy");
+      if (error) throw error;
+      fichaje = data;
     }
+    return res.status(200).json({ ok: true, fichaje });
+  }
 
-    // ── LISTAR (para Informes) ────────────────────────────
-    if (action === "listar") {
-      const { desde, hasta, usuarioNick } = payload || {};
-      let q = supabase.from("fichajes").select("*").order("fecha", { ascending: false }).limit(1000);
+  // ── FICHAR SALIDA ─────────────────────────────────────
+  if (action === "ficharSalida") {
+    const hoy = fechaHoyMadrid();
+    const existente = await fichajeDe(supabase, sesion.nick, hoy, "id, hora_entrada, hora_salida");
+    if (!existente?.hora_entrada) throw new ErrorHttp(400, "Todavía no has fichado la entrada hoy");
+    if (existente.hora_salida) throw new ErrorHttp(400, "Ya has fichado la salida hoy");
+    const h = await horarioDe(supabase, sesion.nick);
+    const horaActual = horaAhoraMadrid();
+    const { data: fichaje, error } = await supabase
+      .from("fichajes")
+      .update({
+        hora_salida: horaActual,
+        horario_entrada_esperado: h.horarioEntrada,
+        horario_salida_esperado: h.horarioSalida,
+        tipo_horario_aplicado: h.tipoHorario,
+        horas_de_mas: calcularHorasDeMas(h.tipoHorario, existente.hora_entrada, horaActual, h.horarioEntrada, h.horarioSalida),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", existente.id)
+      .select("*")
+      .single();
+    if (error) throw error;
+    return res.status(200).json({ ok: true, fichaje });
+  }
+
+  // ── RESUMEN DEL MES EN CURSO ──────────────────────────
+  if (action === "resumenMes") {
+    const hoy = fechaHoyMadrid();
+    const inicioMes = hoy.slice(0, 8) + "01";
+    const { data, error } = await igualCI(supabase.from("fichajes").select("*"), "usuario_nick", sesion.nick)
+      .gte("fecha", inicioMes)
+      .lte("fecha", hoy)
+      .order("fecha", { ascending: false });
+    if (error) throw error;
+    const totalHorasDeMas = (data || []).reduce((acc, f) => acc + (parseFloat(f.horas_de_mas) || 0), 0);
+    return res.status(200).json({ fichajes: data || [], totalHorasDeMas });
+  }
+
+  // ── LISTAR (para Informes) ────────────────────────────
+  if (action === "listar") {
+    const { desde, hasta, usuarioNick } = payload;
+    if (desde && !esFecha(desde)) throw new ErrorHttp(400, "La fecha «desde» no es válida");
+    if (hasta && !esFecha(hasta)) throw new ErrorHttp(400, "La fecha «hasta» no es válida");
+    const { filas, truncado } = await leerTodo(() => {
+      let q = supabase.from("fichajes").select("*").order("fecha", { ascending: false }).order("usuario_nick", { ascending: true });
       if (sesion.role === "admin") {
-        if (usuarioNick) q = q.ilike("usuario_nick", usuarioNick);
+        if (usuarioNick) q = igualCI(q, "usuario_nick", String(usuarioNick));
       } else {
         // Un usuario normal solo puede ver sus propios fichajes, aunque
         // pida otro nick — el filtro real lo decide siempre el servidor.
-        q = q.ilike("usuario_nick", sesion.nick);
+        q = igualCI(q, "usuario_nick", sesion.nick);
       }
       if (desde) q = q.gte("fecha", desde);
       if (hasta) q = q.lte("fecha", hasta);
-      const { data, error } = await q;
-      if (error) throw error;
-      return res.status(200).json({ fichajes: data });
-    }
-
-    // ── CORREGIR (por fecha) ───────────────────────────────
-    // No siempre se puede fichar justo al entrar o al salir, así que
-    // cualquier usuario puede corregir SUS PROPIOS fichajes (entrada y/o
-    // salida) eligiendo el día — incluye días sin fichaje todavía, que
-    // se crean directamente. Un admin puede corregir los de cualquiera
-    // indicando "usuarioNick".
-    if (action === "corregir") {
-      const { fecha, horaEntrada, horaSalida, usuarioNick } = payload || {};
-      if (!fecha) return res.status(400).json({ error: "Falta la fecha" });
-      if ((horaEntrada && !HORA_VALIDA.test(horaEntrada)) || (horaSalida && !HORA_VALIDA.test(horaSalida))) {
-        return res.status(400).json({ error: "La hora debe tener formato HH:MM" });
-      }
-      const nickDestino = sesion.role === "admin" && usuarioNick ? usuarioNick : sesion.nick;
-
-      const { data: existente, error: errE } = await supabase
-        .from("fichajes").select("id, hora_entrada").ilike("usuario_nick", nickDestino).eq("fecha", fecha).maybeSingle();
-      if (errE) throw errE;
-
-      const cambios = { updated_at: new Date().toISOString() };
-      if (horaEntrada !== undefined) cambios.hora_entrada = horaEntrada || null;
-      if (horaSalida !== undefined) {
-        cambios.hora_salida = horaSalida || null;
-        if (horaSalida) {
-          const { data: usuario } = await supabase
-            .from("usuarios").select("horario_entrada, horario_salida, tipo_horario").ilike("nick", nickDestino).maybeSingle();
-          const horarioEntrada = usuario?.horario_entrada || "07:00";
-          const horarioSalida = usuario?.horario_salida || "13:57";
-          const tipoHorario = usuario?.tipo_horario || "fijo";
-          // La hora de entrada para el cálculo: la que se esté guardando
-          // ahora mismo en esta misma corrección si se ha tocado, o si no
-          // la que ya hubiera en el fichaje de ese día.
-          const horaEntradaCalculo = horaEntrada !== undefined ? (horaEntrada || null) : (existente?.hora_entrada || null);
-          cambios.horario_entrada_esperado = horarioEntrada;
-          cambios.horario_salida_esperado = horarioSalida;
-          cambios.tipo_horario_aplicado = tipoHorario;
-          cambios.horas_de_mas = calcularHorasDeMas(tipoHorario, horaEntradaCalculo, horaSalida, horarioEntrada, horarioSalida);
-        } else {
-          cambios.horario_entrada_esperado = null;
-          cambios.horario_salida_esperado = null;
-          cambios.tipo_horario_aplicado = null;
-          cambios.horas_de_mas = null;
-        }
-      }
-
-      let fichaje;
-      if (existente) {
-        const { data, error } = await supabase.from("fichajes").update(cambios).eq("id", existente.id).select("*").single();
-        if (error) throw error;
-        fichaje = data;
-      } else {
-        const { data, error } = await supabase.from("fichajes")
-          .insert({ usuario_nick: nickDestino, fecha, ...cambios })
-          .select("*").single();
-        if (error) throw error;
-        fichaje = data;
-      }
-      return res.status(200).json({ ok: true, fichaje });
-    }
-
-    // A partir de aquí, todas las acciones son solo para administradores.
-    if (sesion.role !== "admin") {
-      return res.status(403).json({ error: "No tienes permiso para gestionar fichajes." });
-    }
-
-    // ── ELIMINAR ──────────────────────────────────────────
-    if (action === "eliminar") {
-      const { id } = payload || {};
-      if (!id) return res.status(400).json({ error: "Falta el identificador" });
-      const { error } = await supabase.from("fichajes").delete().eq("id", id);
-      if (error) throw error;
-      return res.status(200).json({ ok: true });
-    }
-
-    return res.status(400).json({ error: "Acción no reconocida" });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: err.message || "Error inesperado" });
+      return q;
+    });
+    return res.status(200).json({ fichajes: filas, truncado });
   }
-}
+
+  // ── CORREGIR (por fecha) ───────────────────────────────
+  // No siempre se puede fichar justo al entrar o al salir, así que
+  // cualquier usuario puede corregir SUS PROPIOS fichajes (entrada y/o
+  // salida) eligiendo el día — incluye días sin fichaje todavía, que
+  // se crean directamente. Un admin puede corregir los de cualquiera
+  // indicando "usuarioNick".
+  if (action === "corregir") {
+    const { fecha, horaEntrada, horaSalida, usuarioNick } = payload;
+    if (!fecha) throw new ErrorHttp(400, "Falta la fecha");
+    if (!esFecha(fecha)) throw new ErrorHttp(400, "La fecha no es válida");
+    if (fecha > fechaHoyMadrid()) throw new ErrorHttp(400, "No se puede fichar en una fecha futura");
+    if ((horaEntrada && !esHora(horaEntrada)) || (horaSalida && !esHora(horaSalida))) {
+      throw new ErrorHttp(400, "La hora debe tener formato HH:MM");
+    }
+
+    let nickDestino = sesion.nick;
+    let h = null;
+    if (sesion.role === "admin" && usuarioNick && String(usuarioNick).toLowerCase() !== sesion.nick.toLowerCase()) {
+      h = await horarioDe(supabase, String(usuarioNick));
+      if (!h.existe) throw new ErrorHttp(404, "Usuario no encontrado");
+      nickDestino = h.nick; // nick tal como está guardado (mayúsculas incluidas)
+    }
+
+    const existente = await fichajeDe(supabase, nickDestino, fecha, "id, hora_entrada, hora_salida");
+    const tocaEntrada = horaEntrada !== undefined;
+    const tocaSalida = horaSalida !== undefined;
+    const entradaFinal = tocaEntrada ? horaEntrada || null : existente?.hora_entrada || null;
+    const salidaFinal = tocaSalida ? horaSalida || null : existente?.hora_salida || null;
+    if (entradaFinal && salidaFinal && aMinutos(salidaFinal) <= aMinutos(entradaFinal)) {
+      throw new ErrorHttp(400, "La hora de salida debe ser posterior a la de entrada");
+    }
+
+    const cambios = { updated_at: new Date().toISOString() };
+    if (tocaEntrada) cambios.hora_entrada = entradaFinal;
+    if (tocaSalida) cambios.hora_salida = salidaFinal;
+    if (tocaEntrada || tocaSalida) {
+      if (salidaFinal) {
+        h = h || (await horarioDe(supabase, nickDestino));
+        cambios.horario_entrada_esperado = h.horarioEntrada;
+        cambios.horario_salida_esperado = h.horarioSalida;
+        cambios.tipo_horario_aplicado = h.tipoHorario;
+        cambios.horas_de_mas = calcularHorasDeMas(h.tipoHorario, entradaFinal, salidaFinal, h.horarioEntrada, h.horarioSalida);
+      } else {
+        cambios.horario_entrada_esperado = null;
+        cambios.horario_salida_esperado = null;
+        cambios.tipo_horario_aplicado = null;
+        cambios.horas_de_mas = null;
+      }
+    }
+
+    let fichaje;
+    if (existente) {
+      const { data, error } = await supabase.from("fichajes").update(cambios).eq("id", existente.id).select("*").single();
+      if (error) throw error;
+      fichaje = data;
+    } else {
+      const { data, error } = await supabase
+        .from("fichajes")
+        .insert({ usuario_nick: nickDestino, fecha, ...cambios })
+        .select("*")
+        .single();
+      if (error) throw error;
+      fichaje = data;
+    }
+    await auditar(supabase, sesion, "corregir", "fichaje", fichaje.id, {
+      usuario: nickDestino,
+      fecha,
+      antes: existente ? { entrada: existente.hora_entrada, salida: existente.hora_salida } : null,
+      despues: { entrada: entradaFinal, salida: salidaFinal },
+    });
+    return res.status(200).json({ ok: true, fichaje });
+  }
+
+  // A partir de aquí, todas las acciones son solo para administradores.
+  exigirAdmin(sesion, "No tienes permiso para gestionar fichajes.");
+
+  // ── ELIMINAR ──────────────────────────────────────────
+  if (action === "eliminar") {
+    const id = uuid(payload.id);
+    if (!id) throw new ErrorHttp(400, "Falta el identificador");
+    const { error } = await supabase.from("fichajes").delete().eq("id", id);
+    if (error) throw error;
+    await auditar(supabase, sesion, "eliminar", "fichaje", id);
+    return res.status(200).json({ ok: true });
+  }
+
+  throw new ErrorHttp(400, "Acción no reconocida");
+});

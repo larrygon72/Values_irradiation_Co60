@@ -31,6 +31,55 @@ function fmt(d) {
 function pd(s)  { if(!s) return null; const[y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
 function tod(d) { if(!d) return ''; return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 
+// ── Versión y ajustes generales ───────────────────────
+const APP_VERSION = '2.0';
+const RESTAURAR_SESION = true;   // al reabrir la app, seguir dentro si el token (12 h) sigue vigente
+
+// ── SEGURIDAD: escape de HTML ─────────────────────────
+// Todo texto que venga de la base de datos o de otros usuarios (nombres,
+// matrículas, observaciones…) y se meta en un innerHTML DEBE pasar por esc().
+// Sin esto, un usuario podía guardar código en "Observaciones" o en su nombre
+// y ejecutarlo en el navegador de quien abriese el Historial (p. ej. un admin).
+const _ESC_MAP = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => _ESC_MAP[c]); }
+// Para poner un texto DENTRO de un onclick="fn('…')": se escapa como cadena JS y luego como HTML.
+function escJs(s) { return esc(String(s ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/[\r\n]+/g,' ')); }
+// Celda de CSV segura: comillas dobles escapadas y neutraliza las "fórmulas" (=, +, -, @) que Excel
+// ejecutaría al abrir el archivo (inyección de fórmulas). Los números negativos y horas como -0:30 se respetan.
+function csvCell(v) {
+  let t = String(v ?? '');
+  if (/^[=+\-@\t\r]/.test(t) && !/^-?\d+([.,]\d+)?$/.test(t) && !/^-\d+:\d{2}$/.test(t)) t = "'" + t;
+  return '"' + t.replace(/"/g,'""') + '"';
+}
+function csvFila(fila) { return fila.map(csvCell).join(','); }
+function nuevoUid() {
+  try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch {}
+  return 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+}
+
+// ── Carga de librerías bajo demanda (Chart.js, Excel, PDF) ──
+// Están alojadas en /vendor y solo se descargan la primera vez que se usan.
+const LIBS = {
+  chart: ['vendor/chart-4.5.0.umd.min.js'],
+  xlsx:  ['vendor/xlsx-0.18.5.full.min.js'],
+  pdf:   ['vendor/jspdf-2.5.1.umd.min.js', 'vendor/jspdf-autotable-3.8.2.min.js'], // el plugin necesita jsPDF antes
+};
+const _libProm = {};
+function cargarScript(src) {
+  return new Promise((ok, ko) => {
+    const el = document.createElement('script');
+    el.src = src; el.async = false;
+    el.onload = ok; el.onerror = () => ko(new Error('No se pudo cargar ' + src));
+    document.head.appendChild(el);
+  });
+}
+function cargarLib(nombre) {
+  if (_libProm[nombre]) return _libProm[nombre];
+  const p = (async () => { for (const src of LIBS[nombre]) await cargarScript(src); })();
+  p.catch(() => { delete _libProm[nombre]; });   // si falla (sin conexión), se puede reintentar
+  return (_libProm[nombre] = p);
+}
+
 // ── STATE ─────────────────────────────────────────────
 const S = {
   user:null, isAdmin:false, dose:70, staged:[],
@@ -44,13 +93,11 @@ const S = {
   histSort:{campo:'fecha_irradiacion',dir:'desc'},
   editingId:null, detRegistro:null,
   dashRegs:[],
-  lastCheck:null
+  lastCheck:null, offline:false, dashCache:null
 };
 let _systemThemeMQ=null;
 
 const LS = {
-  users()  { try{return JSON.parse(localStorage.getItem('vi_u')||'[]')}catch{return []} },
-  setU(u)  { localStorage.setItem('vi_u',JSON.stringify(u)) },
   dose()   { return parseFloat(localStorage.getItem('vi_d')||'70')||70 },
   setD(d)  { localStorage.setItem('vi_d',String(d)) },
   staged() { try{return JSON.parse(localStorage.getItem('vi_s')||'[]')}catch{return []} },
@@ -77,6 +124,15 @@ const LS = {
   setEstacionCache(d){ localStorage.setItem('vi_est',JSON.stringify(d||[])) },
   pending()   { try{return JSON.parse(localStorage.getItem('vi_pend')||'[]')}catch{return []} },
   setPending(p){ localStorage.setItem('vi_pend',JSON.stringify(p||[])) },
+  // Registros que el servidor ha rechazado por datos no válidos (no se pierden: se avisa y se conservan aquí)
+  rejected()  { try{return JSON.parse(localStorage.getItem('vi_rej')||'[]')}catch{return []} },
+  setRejected(r){ localStorage.setItem('vi_rej',JSON.stringify(r||[])) },
+  helpSeen()  { return localStorage.getItem('vi_help_v1')==='1' },
+  setHelpSeen(){ localStorage.setItem('vi_help_v1','1') },
+  // Credenciales para entrar SIN conexión: solo un "hash" (PBKDF2) de cada usuario que ya entró antes
+  // con conexión en este dispositivo — nunca la contraseña en claro.
+  off()       { try{return JSON.parse(localStorage.getItem('vi_off')||'{}')}catch{return {}} },
+  setOff(o)   { localStorage.setItem('vi_off',JSON.stringify(o||{})) },
 };
 
 // ════════════════════════════════════════════════════
@@ -110,9 +166,23 @@ async function apiPost(path, body) {
   if (!res.ok) {
     const err = new Error((data && data.error) || ('Error ' + res.status));
     err.status = res.status;
+    err.code = data && data.code;
+    // Sesión caducada o revocada (p. ej. cambio de contraseña): volver al login con un aviso claro
+    if (res.status === 401 && err.code === 'SESION_CADUCADA' && body && body.token) manejarSesionCaducada();
+    // Contraseña inicial sin cambiar: el servidor no deja hacer nada más hasta que se cambie
+    else if (res.status === 403 && err.code === 'DEBE_CAMBIAR_PASS') abrirCambioPass(true);
     throw err;
   }
   return data || {};
+}
+let _sesionCaducadaEnCurso = false;
+function manejarSesionCaducada() {
+  if (!S.user && !LS.token()) return;
+  if (_sesionCaducadaEnCurso) return;
+  _sesionCaducadaEnCurso = true;
+  logout();
+  showErr('Tu sesión ha caducado. Vuelve a entrar para continuar.');
+  setTimeout(() => { _sesionCaducadaEnCurso = false; }, 1500);
 }
 
 // Indicador visual de conexión con la nube (badge del menú + login)
@@ -144,18 +214,8 @@ async function refreshDrivers() {
     LS.setDriverCache(data.usuarios || []);
     setCloudState('ok');
   } catch (e) {
+    // Sin conexión (o error): se sigue usando la última lista descargada.
     setCloudState(e.isNetwork ? 'off' : 'err');
-    if (e.isNetwork) {
-      // Sin conexión: construimos la lista de conductores con los usuarios
-      // que haya en este dispositivo, para que el desplegable siga
-      // funcionando (aunque no incluya usuarios dados de alta en otros
-      // dispositivos hasta que vuelva la conexión).
-      const local = LS.users().map(u => ({
-        nick: u.name, nombre: u.nombre||'', apellido1: u.apellido1||'', apellido2: u.apellido2||'',
-        codigo: codigoConductor(u.nombre||u.name, u.apellido1||'', u.apellido2||'')
-      }));
-      LS.setDriverCache(local);
-    }
   }
   return LS.driverCache();
 }
@@ -167,7 +227,7 @@ function populateConductorSelect(drivers) {
   sel.innerHTML = '<option value="">— Selecciona conductor —</option>' +
     list.map(u => {
       const nombreCompleto = [u.nombre,u.apellido1,u.apellido2].filter(Boolean).join(' ') || u.nick;
-      return `<option value="${u.nick}">${nombreCompleto}</option>`;
+      return `<option value="${esc(u.nick)}">${esc(nombreCompleto)}</option>`;
     }).join('');
   if (list.some(u => u.nick === current)) sel.value = current;
   onConductorChange();
@@ -200,7 +260,7 @@ function populateIrradiadorSelect(list) {
   sel.innerHTML = '<option value="">— Selecciona irradiador —</option>' +
     items.map(u => {
       const nombreCompleto = [u.nombre,u.apellido1,u.apellido2].filter(Boolean).join(' ') || '—';
-      return `<option value="${u.id}">${nombreCompleto}</option>`;
+      return `<option value="${esc(u.id)}">${esc(nombreCompleto)}</option>`;
     }).join('');
   if (items.some(u => u.id === current)) sel.value = current;
   onIrradiadorChange();
@@ -235,7 +295,7 @@ function populateVehiculoSelect(prefix, list) {
   const items = list || LS.vehiculoCache();
   const current = sel.value;
   sel.innerHTML = '<option value="">— Selecciona vehículo —</option>' +
-    items.map(v => `<option value="${v.id}">${v.matricula}${v.numero_obra?' · Obra '+v.numero_obra:''}</option>`).join('') +
+    items.map(v => `<option value="${esc(v.id)}">${esc(v.matricula)}${v.numero_obra?' · Obra '+esc(v.numero_obra):''}</option>`).join('') +
     '<option value="__new__">+ Añadir vehículo nuevo…</option>';
   if (items.some(v => v.id === current)) sel.value = current;
   onVehiculoChange(prefix);
@@ -382,7 +442,7 @@ function populateEstacionSelect(prefix, list) {
   const items = list || LS.estacionCache();
   const current = sel.value;
   sel.innerHTML = '<option value="">— Selecciona estación —</option>' +
-    items.map(e => `<option value="${e.id}">${e.nombre}</option>`).join('') +
+    items.map(e => `<option value="${esc(e.id)}">${esc(e.nombre)}</option>`).join('') +
     '<option value="__new__">+ Añadir estación nueva…</option>';
   if (items.some(e => e.id === current)) sel.value = current;
   onEstacionChange(prefix);
@@ -419,59 +479,101 @@ function cancelarEstacionNueva(prefix) {
 }
 
 // ── Cola de registros pendientes de sincronizar ──────
+// Un registro se guarda SIEMPRE primero en el dispositivo y después se envía a la nube:
+//  · Sin conexión, sesión caducada o fallo del servidor -> queda «pendiente» y se reintenta solo.
+//  · Si el servidor lo rechaza por datos no válidos NO se descarta en silencio (antes se perdía):
+//    pasa a la lista de rechazados, se avisa y se conserva en este dispositivo.
+//  · Cada registro lleva un identificador único (uid): si un envío llegó al servidor pero la respuesta
+//    se perdió por mala cobertura, el reintento NO crea un registro duplicado.
+const _RECHAZO_DEFINITIVO = [400, 404, 409, 413, 422];
+function esRechazoDefinitivo(e) { return !e.isNetwork && _RECHAZO_DEFINITIVO.includes(e.status); }
+function marcarRechazado(rec, motivo) {
+  const rej = LS.rejected().filter(r => r.at !== rec.at);
+  rej.push({ ...rec, rechazo: motivo || 'Datos no válidos' });
+  LS.setRejected(rej);
+}
+function encolarPendiente(rec) {
+  const pend = LS.pending();
+  if (!pend.some(r => r.at === rec.at)) { pend.push(rec); LS.setPending(pend); }
+}
 async function syncRecordToCloud(rec) {
-  if (!LS.token()) return; // sesión solo local (login sin conexión): no intentamos la nube
+  // Sesión sin conexión (sin token): se guarda como pendiente y se envía al volver a entrar con internet.
+  if (!LS.token()) { encolarPendiente(rec); return; }
   try {
     await apiPost('/registros', { action:'guardar', token: LS.token(), payload: rec });
     setCloudState('ok');
+    invalidarCacheDashboard();
   } catch (e) {
     setCloudState(e.isNetwork ? 'off' : 'err');
-    const pend = LS.pending(); pend.push(rec); LS.setPending(pend);
-  }
-}
-async function flushPending() {
-  if (!LS.token()) return;
-  const pend = LS.pending();
-  if (!pend.length) return;
-  const kept = []; let synced = 0; let networkDown = false;
-  for (const rec of pend) {
-    if (networkDown) { kept.push(rec); continue; }
-    try {
-      await apiPost('/registros', { action:'guardar', token: LS.token(), payload: rec });
-      synced++;
-    } catch (e) {
-      if (e.isNetwork) { networkDown = true; kept.push(rec); }
-      // si el error es del propio registro (no de red), se descarta y no se reintenta
+    if (esRechazoDefinitivo(e)) {
+      marcarRechazado(rec, e.message);
+      toast('⚠ El servidor no ha aceptado el registro (' + e.message + '). Se conserva en este dispositivo.');
+    } else {
+      encolarPendiente(rec);
     }
   }
-  LS.setPending(kept);
-  if (synced > 0) {
-    setCloudState('ok');
-    toast(`☁ ${synced} registro${synced===1?'':'s'} sincronizado${synced===1?'':'s'} con la nube`);
-  }
 }
+let _flushing = false;
+async function flushPending() {
+  if (!LS.token() || _flushing) return;
+  if (!LS.pending().length) return;
+  _flushing = true;
+  try {
+    const resueltos = new Set(); let synced = 0, rechazados = 0, parar = false;
+    for (const rec of LS.pending()) {
+      // Los registros hechos sin conexión por OTRO usuario esperan a que él vuelva a entrar (así no se le atribuyen a quien no es).
+      if (parar || (rec.by && S.user && rec.by !== S.user)) continue;
+      try {
+        await apiPost('/registros', { action:'guardar', token: LS.token(), payload: rec });
+        resueltos.add(rec.at); synced++;
+      } catch (e) {
+        if (esRechazoDefinitivo(e)) { marcarRechazado(rec, e.message); resueltos.add(rec.at); rechazados++; }
+        else parar = true;   // red caída, sesión caducada o fallo del servidor: se reintenta más tarde
+      }
+    }
+    // Se relee la cola por si se guardó algo nuevo mientras se enviaba.
+    LS.setPending(LS.pending().filter(r => !resueltos.has(r.at)));
+    if (synced > 0) {
+      setCloudState('ok'); invalidarCacheDashboard();
+      toast(`☁ ${synced} registro${synced===1?'':'s'} sincronizado${synced===1?'':'s'} con la nube`);
+    }
+    if (rechazados > 0) toast(`⚠ ${rechazados} registro${rechazados===1?'':'s'} no se ha${rechazados===1?'':'n'} podido enviar (datos no válidos). Revísalo${rechazados===1?'':'s'} en «Registros».`);
+  } finally { _flushing = false; }
+}
+function invalidarCacheDashboard() { S.dashCache = null; }
 
 // ── NOTIFICACIONES — "alguien ha guardado un registro" ──
 // Sondeo periódico (no websocket): cada poco tiempo se pregunta al backend
 // (con el mismo token de sesión, sin exponer Supabase al navegador) si hay
 // registros nuevos desde la última comprobación. Es casi al instante para
 // el uso normal de esta app y no cambia el modelo de seguridad ya montado.
-let notifTimer=null;
-const NOTIF_INTERVALO_MS=25000;
+let notifTimer=null, notifActivo=false;
+const NOTIF_INTERVALO_MS=25000;          // con la app a la vista
+const NOTIF_INTERVALO_SEGUNDO_PLANO_MS=60000;   // con la pestaña oculta: menos consultas al servidor
+function programarSondeo() {
+  if(!notifActivo) return;
+  notifTimer=setTimeout(async()=>{
+    await checkNuevosRegistros();
+    programarSondeo();
+  }, document.hidden?NOTIF_INTERVALO_SEGUNDO_PLANO_MS:NOTIF_INTERVALO_MS);
+}
 function startNotifPolling() {
-  if(notifTimer) return;
-  notifTimer=setInterval(checkNuevosRegistros, NOTIF_INTERVALO_MS);
+  if(notifActivo) return;
+  notifActivo=true; programarSondeo();
 }
 function stopNotifPolling() {
-  if(notifTimer){ clearInterval(notifTimer); notifTimer=null; }
+  notifActivo=false;
+  if(notifTimer){ clearTimeout(notifTimer); notifTimer=null; }
 }
 async function checkNuevosRegistros() {
   if(!LS.token()||!S.lastCheck) return;
+  if(navigator.onLine===false) return;
   try{
     const data=await apiPost('/registros',{action:'nuevos',token:LS.token(),payload:{desde:S.lastCheck}});
     const regs=data.registros||[];
     if(!regs.length) return;
     S.lastCheck=regs[regs.length-1].created_at;
+    invalidarCacheDashboard();
     regs.filter(r=>r.creado_por!==S.user).forEach(mostrarNotificacionRegistro);
   }catch(e){
     // Sondeo en segundo plano: si falla (sin conexión, etc.) no molestamos
@@ -507,20 +609,32 @@ function actualizarEstadoNotifUI() {
   btn.style.display=(estado==='default')?'':'none';
 }
 
+function registrarServiceWorker() {
+  if(!('serviceWorker' in navigator)) return;
+  const habiaControlador=!!navigator.serviceWorker.controller;
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('sw.js').then(reg=>{ try{ reg.update(); }catch{} }).catch(()=>{});
+  });
+  // Cuando llega una versión nueva de la app se avisa (la primera instalación no avisa)
+  navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+    if(habiaControlador){ const b=document.getElementById('updBar'); if(b) b.classList.add('on'); }
+  });
+}
 function boot() {
-  if(LS.users().length===0)
-    LS.setU([{name:'Admin',pass:'Aedes',role:'admin',att:0,locked:false,nombre:'Admin',apellido1:'Admin',apellido2:''}]);
+  // Almacén local antiguo de usuarios: guardaba contraseñas en texto claro y una cuenta Admin con la
+  // contraseña de fábrica. Se elimina; para entrar sin conexión ahora se usa un hash (ver más abajo).
+  try{ localStorage.removeItem('vi_u'); }catch{}
   S.dose=LS.dose(); S.staged=LS.staged(); S.md=LS.md();
   applyTheme(LS.themePref());
   updStagedUI();
   setCloudState(null);
   window.addEventListener('online', flushPending);
+  document.addEventListener('visibilitychange', ()=>{
+    if(!document.hidden && S.user){ flushPending(); checkNuevosRegistros(); }
+  });
   setInterval(flushPending, 60000);
-  if('serviceWorker' in navigator){
-    window.addEventListener('load', ()=>{
-      navigator.serviceWorker.register('sw.js').catch(()=>{});
-    });
-  }
+  registrarServiceWorker();
+  restaurarSesion();
 }
 
 // ── NAVIGATION ───────────────────────────────────────
@@ -541,7 +655,7 @@ function go(id) {
     const tipoSel=document.getElementById('informeTipo'); if(tipoSel) tipoSel.value='registros';
     renderCamposInforme();
     const hoy=new Date(), hace30=new Date(); hace30.setDate(hoy.getDate()-30);
-    const iso=d=>d.toISOString().slice(0,10);
+    const iso=tod;
     document.getElementById('iDesde').value=iso(hace30);
     document.getElementById('iHasta').value=iso(hoy);
     S.informesRaw=[];
@@ -585,9 +699,18 @@ function nuevoRegistro() {
 }
 function logout() {
   LS.setToken(''); LS.setSession(null);
-  S.user=null; S.isAdmin=false;
+  S.user=null; S.isAdmin=false; S.offline=false;
+  S.dashCache=null; S.dashRegs=[]; S.histRaw=[]; S.histFiltered=[]; S.informesRaw=[]; S.detRegistro=null; S.editingId=null;
   stopNotifPolling();
+  cerrarTodosLosDialogos();
+  // Antes el usuario y la contraseña seguían escritos en el login tras cerrar sesión: el siguiente en usar el equipo entraba con un clic.
+  lReset();
   go('sl');
+}
+function cerrarTodosLosDialogos() {
+  ['confirmOv','passOv','detOv','camposOv','exov','scov','rdiag','urnaModal'].forEach(id=>{ const el=document.getElementById(id); if(el) el.classList.remove('on'); });
+  _passObligatorio=false; _confirmResolve=null;
+  closeDrawer();
 }
 function toggleDrawer(){ document.getElementById('drawer').classList.toggle('on'); document.getElementById('drawerOv').classList.toggle('on'); }
 function closeDrawer(){ document.getElementById('drawer').classList.remove('on'); document.getElementById('drawerOv').classList.remove('on'); }
@@ -597,26 +720,38 @@ function closeDrawer(){ document.getElementById('drawer').classList.remove('on')
 //   - Si existe          -> se pide la contraseña (lSubmit)
 //   - Si no existe        -> se muestra un mini-formulario de alta con
 //                            nombre y apellidos (lRegister), necesarios
-//                            para poder calcular el código de conductor.
-//   - Si no hay conexión  -> se usa el almacén local (igual que antes).
+//                            para poder calcular el código de conductor
+//                            (si el administrador ha cerrado el alta, se avisa).
+//   - Si no hay conexión  -> solo entran quienes ya hayan entrado antes con
+//                            conexión en este dispositivo (ver "Credenciales sin conexión").
+let _registroAbierto = true;
 async function lStep() {
   const name=document.getElementById('luser').value.trim();
   if(!name){showErr('Introduce un nombre de usuario');return;}
   showErr('');
   setBtnLoading('lbtn', true, 'Comprobando…');
-  let existe=false, bloqueado=false;
+  let existe=false, bloqueado=false, msgBloqueo='';
   try{
     const data=await apiPost('/auth',{action:'check',nick:name});
-    existe=!!data.existe; bloqueado=!!data.bloqueado;
+    existe=!!data.existe; bloqueado=!!data.bloqueado; msgBloqueo=data.mensajeBloqueo||'';
+    _registroAbierto=data.registroAbierto!==false;
     setCloudState('ok');
   }catch(e){
     if(!e.isNetwork){ setCloudState('err'); setBtnLoading('lbtn', false); showErr(e.message); return; }
     setCloudState('off');
-    const u=LS.users().find(u=>u.name.toLowerCase()===name.toLowerCase());
-    existe=!!u; bloqueado=u?!!u.locked:false;
+    existe=!!credencialOffline(name);
+    if(!existe){
+      setBtnLoading('lbtn', false);
+      showErr('Sin conexión: no puedo comprobar ese usuario. Conéctate a internet para entrar o crear una cuenta.');
+      return;
+    }
   }
   setBtnLoading('lbtn', false);
-  if(bloqueado){showErr('Acceso bloqueado. Contacta con el administrador.');return;}
+  if(bloqueado){showErr(msgBloqueo||'Acceso bloqueado. Contacta con el administrador.');return;}
+  if(!existe && !_registroAbierto){
+    showErr('Ese usuario no existe. Pide al administrador que te dé de alta.');
+    return;
+  }
 
   document.getElementById('luser').disabled=true;
   document.getElementById('lchg').style.display='block';
@@ -644,30 +779,13 @@ async function lSubmit() {
     const data=await apiPost('/auth',{action:'login',nick:name,pass});
     setCloudState('ok');
     setBtnLoading('lbtn', false);
+    guardarCredencialOffline(data.usuario, pass).catch(()=>{});
+    document.getElementById('lpass').value='';
     onAuthSuccess(data.usuario,data.token);
   }catch(e){
     setBtnLoading('lbtn', false);
-    if(e.isNetwork){ setCloudState('off'); loginLocalFallback(name,pass); return; }
+    if(e.isNetwork){ setCloudState('off'); await loginOffline(name,pass); return; }
     setCloudState('err'); showErr(e.message);
-    document.getElementById('lpass').value='';
-  }
-}
-function loginLocalFallback(name,pass) {
-  const users=LS.users();
-  const i=users.findIndex(u=>u.name.toLowerCase()===name.toLowerCase());
-  if(i<0){showErr('Usuario no encontrado (sin conexión con la nube)');return;}
-  const u=users[i];
-  if(u.locked){showErr('Acceso bloqueado.');return;}
-  if(u.pass===pass){
-    u.att=0; LS.setU(users);
-    LS.setToken(''); LS.setSession(null);
-    S.user=u.name; S.isAdmin=u.role==='admin'; S.dose=LS.dose();
-    toast('☁ Sin conexión: sesión solo local');
-    go('welcome2');
-  } else {
-    u.att=(u.att||0)+1; const rem=3-u.att;
-    if(rem<=0){u.locked=true;LS.setU(users);showErr('Bloqueado. Demasiados intentos.');}
-    else{LS.setU(users);showErr(`Contraseña incorrecta. Quedan ${rem} intento${rem===1?'':'s'}.`);}
     document.getElementById('lpass').value='';
   }
 }
@@ -679,36 +797,98 @@ async function lRegister() {
   const pass=document.getElementById('rPass').value;
   const pass2=document.getElementById('rPass2').value;
   if(!nombre||!ap1){showErr('Introduce al menos el nombre y el primer apellido');return;}
-  if(!pass||pass.length<4){showErr('La contraseña debe tener al menos 4 caracteres');return;}
+  if(!pass||pass.length<8){showErr('La contraseña debe tener al menos 8 caracteres');return;}
   if(pass!==pass2){showErr('Las contraseñas no coinciden');return;}
   setBtnLoading('lbtn', true, 'Creando cuenta…');
   try{
     const data=await apiPost('/auth',{action:'register',nick:name,pass,nombre,apellido1:ap1,apellido2:ap2});
     setCloudState('ok');
     setBtnLoading('lbtn', false);
+    guardarCredencialOffline(data.usuario, pass).catch(()=>{});
+    ['rPass','rPass2'].forEach(id=>{document.getElementById(id).value='';});
     onAuthSuccess(data.usuario,data.token);
   }catch(e){
     setBtnLoading('lbtn', false);
-    if(!e.isNetwork){ showErr(e.message); return; }
-    setCloudState('off');
-    const users=LS.users();
-    if(users.find(u=>u.name.toLowerCase()===name.toLowerCase())){showErr('Ese usuario ya existe');return;}
-    users.push({name,pass,role:'user',att:0,locked:false,nombre,apellido1:ap1,apellido2:ap2});
-    LS.setU(users);
-    LS.setToken(''); LS.setSession(null);
-    S.user=name; S.isAdmin=false; S.dose=LS.dose();
-    toast('☁ Sin conexión: cuenta creada solo en este dispositivo');
-    go('welcome2');
+    if(e.isNetwork){ setCloudState('off'); showErr('Sin conexión: para crear una cuenta necesitas internet.'); return; }
+    showErr(e.message);
   }
 }
-function onAuthSuccess(usuario, token) {
-  LS.setToken(token); LS.setSession(usuario);
-  S.user=usuario.nick; S.isAdmin=usuario.role==='admin'; S.dose=LS.dose();
-  S.lastCheck=new Date().toISOString();
+
+// ── Credenciales sin conexión ─────────────────────────
+// Tras cada inicio de sesión CON conexión se guarda en este dispositivo un "hash" de la contraseña
+// (PBKDF2-SHA256, sal aleatoria): nunca la contraseña. Sin conexión solo puede entrar quien ya lo
+// hizo antes aquí; tras 5 fallos se espera 5 minutos. La sesión sin conexión no tiene permisos de
+// administrador y no puede consultar la nube: solo trabaja con los datos de este dispositivo.
+const OFF_ITER=150000, OFF_MAX_FALLOS=5, OFF_BLOQUEO_MS=5*60*1000;
+const _b64=(bytes)=>{ let t=''; bytes.forEach(b=>{t+=String.fromCharCode(b);}); return btoa(t); };
+const _unb64=(t)=>Uint8Array.from(atob(t),c=>c.charCodeAt(0));
+async function derivarClaveOffline(pass, salt, iter) {
+  const key=await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveBits']);
+  const bits=await crypto.subtle.deriveBits({name:'PBKDF2', salt, iterations:iter, hash:'SHA-256'}, key, 256);
+  return _b64(new Uint8Array(bits));
+}
+const hayCripto=()=>!!(window.crypto && crypto.subtle && crypto.getRandomValues);
+function credencialOffline(nick) { return LS.off()[String(nick||'').trim().toLowerCase()]||null; }
+async function guardarCredencialOffline(usuario, pass) {
+  if(!hayCripto()||!usuario||!usuario.nick) return;
+  const salt=crypto.getRandomValues(new Uint8Array(16));
+  const hash=await derivarClaveOffline(pass, salt, OFF_ITER);
+  const o=LS.off();
+  o[usuario.nick.toLowerCase()]={ nick:usuario.nick, nombre:usuario.nombre||'', apellido1:usuario.apellido1||'', apellido2:usuario.apellido2||'',
+    codigo:usuario.codigo||'', salt:_b64(salt), iter:OFF_ITER, hash, fallos:0, hasta:0 };
+  LS.setOff(o);
+}
+async function verificarCredencialOffline(nick, pass) {
+  const o=LS.off(), c=o[String(nick||'').trim().toLowerCase()];
+  if(!c) return {ok:false, mensaje:'Sin conexión: no puedo comprobar ese usuario. Conéctate a internet para entrar.'};
+  if(!hayCripto()) return {ok:false, mensaje:'Este navegador no permite entrar sin conexión. Conéctate a internet.'};
+  if(c.hasta && c.hasta>Date.now()){
+    const min=Math.ceil((c.hasta-Date.now())/60000);
+    return {ok:false, mensaje:`Demasiados intentos. Vuelve a probar en ${min} minuto${min===1?'':'s'}.`};
+  }
+  const hash=await derivarClaveOffline(pass, _unb64(c.salt), c.iter||OFF_ITER);
+  if(hash===c.hash){ c.fallos=0; c.hasta=0; LS.setOff(o); return {ok:true, usuario:c}; }
+  c.fallos=(c.fallos||0)+1;
+  if(c.fallos>=OFF_MAX_FALLOS){ c.fallos=0; c.hasta=Date.now()+OFF_BLOQUEO_MS; }
+  LS.setOff(o);
+  return {ok:false, mensaje:'Contraseña incorrecta.'};
+}
+async function loginOffline(name, pass) {
+  const r=await verificarCredencialOffline(name, pass);
+  document.getElementById('lpass').value='';
+  if(!r.ok){ showErr(r.mensaje); return; }
+  LS.setToken(''); LS.setSession(null);
+  S.user=r.usuario.nick; S.isAdmin=false; S.offline=true; S.dose=LS.dose();
+  toast('☁ Sin conexión: sesión solo en este dispositivo');
   go('welcome2');
+}
+
+// ── Sesión ────────────────────────────────────────────
+function jwtExp(token) {
+  try{
+    const b=token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');
+    return JSON.parse(atob(b)).exp||0;
+  }catch{ return 0; }
+}
+// Al reabrir la app se sigue dentro mientras el token (12 h) siga vigente; el servidor lo vuelve a
+// comprobar en cada petición, así que si la cuenta se borró o cambió, se vuelve al login con aviso.
+function restaurarSesion() {
+  if(!RESTAURAR_SESION) return false;
+  const tok=LS.token(), ses=LS.session();
+  if(!tok||!ses||!ses.nick) return false;
+  if(jwtExp(tok)*1000 < Date.now()+60000){ LS.setToken(''); LS.setSession(null); return false; }
+  onAuthSuccess(ses, tok, {restaurada:true});
+  return true;
+}
+function onAuthSuccess(usuario, token, opts) {
+  LS.setToken(token); LS.setSession(usuario);
+  S.user=usuario.nick; S.isAdmin=usuario.role==='admin'; S.offline=false; S.dose=LS.dose();
+  S.lastCheck=new Date().toISOString(); S.dashCache=null;
+  go(opts&&opts.restaurada?'menu':'welcome2');
   flushPending();
   refreshDrivers().then(()=>populateConductorSelect());
   startNotifPolling();
+  if(usuario.mustChangePassword) abrirCambioPass(true);
 }
 function lReset() {
   delete _btnOrigLabel['lbtn'];
@@ -719,12 +899,56 @@ function lReset() {
   document.getElementById('lregF').style.display='none';
   ['rNombre','rAp1','rAp2','rPass','rPass2'].forEach(id=>{const e=document.getElementById(id); if(e)e.value='';});
   document.getElementById('lchg').style.display='none';
-  document.getElementById('lbtn').textContent='Continuar';
-  document.getElementById('lbtn').onclick=lStep;
+  const b=document.getElementById('lbtn'); b.disabled=false; b.classList.remove('loading');
+  b.textContent='Continuar'; b.onclick=lStep;
   showErr(''); document.getElementById('lok').style.display='none';
 }
 function showErr(m){const e=document.getElementById('lerr');if(!m){e.style.display='none';return;}e.textContent=m;e.style.display='block';document.getElementById('lok').style.display='none';}
 function showOk(m){const e=document.getElementById('lok');e.textContent=m;e.style.display='block';document.getElementById('lerr').style.display='none';}
+
+// ── Cambio de contraseña ──────────────────────────────
+let _passObligatorio=false;
+function abrirCambioPass(obligatorio) {
+  // Si el diálogo obligatorio ya está abierto no se reinicia (lo que se está escribiendo se perdería).
+  if(obligatorio && _passObligatorio && document.getElementById('passOv').classList.contains('on')) return;
+  if(!LS.token()){ toast('Para cambiar la contraseña necesitas haber entrado con conexión a internet.'); return; }
+  _passObligatorio=!!obligatorio;
+  ['passActual','passNueva','passNueva2'].forEach(id=>{document.getElementById(id).value='';});
+  const err=document.getElementById('passErr'); err.style.display='none'; err.textContent='';
+  document.getElementById('passMsg').textContent = obligatorio
+    ? 'Por seguridad tienes que cambiar tu contraseña antes de continuar. Elige una nueva de al menos 8 caracteres.'
+    : 'Elige una contraseña nueva de al menos 8 caracteres.';
+  document.getElementById('passCancelBtn').style.display = obligatorio ? 'none' : '';
+  document.getElementById('passOv').classList.add('on');
+  setTimeout(()=>{ const f=document.getElementById('passActual'); if(f) f.focus(); },50);
+}
+function cerrarCambioPass() {
+  if(_passObligatorio) return;
+  document.getElementById('passOv').classList.remove('on');
+}
+async function guardarCambioPass() {
+  const actual=document.getElementById('passActual').value;
+  const n1=document.getElementById('passNueva').value;
+  const n2=document.getElementById('passNueva2').value;
+  const fallo=(m)=>{ const e=document.getElementById('passErr'); e.textContent=m; e.style.display='block'; };
+  if(!actual){ fallo('Escribe tu contraseña actual'); return; }
+  if(n1.length<8){ fallo('La contraseña nueva debe tener al menos 8 caracteres'); return; }
+  if(n1!==n2){ fallo('Las contraseñas nuevas no coinciden'); return; }
+  if(n1===actual){ fallo('La contraseña nueva debe ser distinta de la actual'); return; }
+  setBtnLoading('passOkBtn', true, 'Guardando…');
+  try{
+    const data=await apiPost('/auth',{action:'cambiarPass',token:LS.token(),payload:{passActual:actual,passNueva:n1}});
+    LS.setToken(data.token); LS.setSession(data.usuario);
+    guardarCredencialOffline(data.usuario, n1).catch(()=>{});
+    _passObligatorio=false;
+    document.getElementById('passOv').classList.remove('on');
+    ['passActual','passNueva','passNueva2'].forEach(id=>{document.getElementById(id).value='';});
+    toast('✓ Contraseña cambiada');
+  }catch(e){
+    fallo(e.isNetwork ? 'Sin conexión: no se ha podido cambiar la contraseña' : e.message);
+  }
+  setBtnLoading('passOkBtn', false);
+}
 
 // ── DASHBOARD ─────────────────────────────────────────
 function saludoHora() {
@@ -742,6 +966,7 @@ async function renderMenu() {
   const n=S.staged.length;
   const b=document.getElementById('nbfSb');
   if(b){ b.textContent=n; b.style.display=n>0?'inline-flex':'none'; }
+  const helpCard=document.getElementById('helpCard'); if(helpCard) helpCard.style.display=LS.helpSeen()?'none':'';
   const muserSb=document.getElementById('muserSb'); if(muserSb) muserSb.textContent=S.user||'—';
   const muserAvSb=document.getElementById('muserAvSb'); if(muserAvSb) muserAvSb.textContent=(S.user||'?').charAt(0).toUpperCase();
   await actualizarDashboardKPIs();
@@ -752,8 +977,15 @@ async function actualizarDashboardKPIs() {
   if(!LS.token()){ renderDashboardLocal(hoy); return; }
   const inicioMes=hoy.slice(0,7)+'-01';
   try{
-    const data=await apiPost('/registros',{action:'listar',token:LS.token(),payload:{desde:inicioMes,hasta:hoy}});
-    const regs=data.registros||[];
+    // Caché de 30 s: volver al menú desde otra pantalla ya no repite la consulta al servidor cada vez.
+    let regs;
+    const c=S.dashCache;
+    if(c && c.hoy===hoy && Date.now()-c.t<30000) regs=c.regs;
+    else{
+      const data=await apiPost('/registros',{action:'listar',token:LS.token(),payload:{desde:inicioMes,hasta:hoy}});
+      regs=data.registros||[];
+      S.dashCache={t:Date.now(),hoy,regs};
+    }
     const regsHoy=regs.filter(r=>r.fecha_irradiacion===hoy);
     document.getElementById('kpiHoy').textContent=regsHoy.length;
     document.getElementById('kpiCompletas').textContent=regsHoy.filter(r=>r.h_fin_irr).length;
@@ -783,11 +1015,12 @@ function renderResumenDosis(regs, hoy) {
   dibujarTendenciaDashboard();
 }
 let dashChartInstance=null;
-function dibujarTendenciaDashboard() {
+async function dibujarTendenciaDashboard() {
   const regs=S.dashRegs||[];
   const wrap=document.getElementById('dashChartWrap');
   const canvas=document.getElementById('dashChart');
-  if(!wrap||!canvas||!window.Chart||!regs.length){ if(wrap) wrap.style.display='none'; return; }
+  if(!wrap||!canvas||!regs.length){ if(wrap) wrap.style.display='none'; return; }
+  if(!window.Chart){ try{ await cargarLib('chart'); }catch{ wrap.style.display='none'; return; } }
   wrap.style.display='block';
   if(dashChartInstance){ dashChartInstance.destroy(); dashChartInstance=null; }
 
@@ -801,10 +1034,14 @@ function dibujarTendenciaDashboard() {
     if(tipo==='texpReal') return r.tiempo_exposicion_real||0;
     return 0;
   };
-  const UNIDADES={dosis:'Gy',urnas:'urnas',temp:'°C',expUsv:'µSv',tiempoOperador:'min',texpReal:'s'};
+  const UNIDADES={dosis:'Gy',urnas:'urnas',temp:'°C',expUsv:'µSv',tiempoOperador:'h:mm',texpReal:'s'};
   const ETIQUETAS={dosis:'Dosis',urnas:'Nº urnas',temp:'Tª media',expUsv:'Exposición',tiempoOperador:'Tiempo operador',texpReal:'Tiempo exp. real'};
   const ES_SUMA=['dosis','urnas','expUsv','tiempoOperador'];
   const unidad=UNIDADES[tipo]||''; const label=ETIQUETAS[tipo]||'Valor';
+  // Los datos de "tiempo operador" se guardan en minutos, pero se muestran como h:mm (ejes y aviso al pasar el ratón)
+  const esDuracion=(tipo==='tiempoOperador');
+  const ticksY={};
+  if(esDuracion) ticksY.callback=(v)=>formatMinutos(v);
 
   const porDia={};
   regs.forEach(r=>{
@@ -822,17 +1059,18 @@ function dibujarTendenciaDashboard() {
   });
 
   const cPrimary=temaColor('--blue-l'), cGrid=temaColor('--brd'), cTick=temaColor('--txt3');
+  ticksY.color=cTick;
   dashChartInstance=new Chart(canvas.getContext('2d'),{
     type:'bar',
     data:{labels:dias.map(d=>fmt(pd(d))), datasets:[{label,data:valores,backgroundColor:cPrimary,borderRadius:4}]},
     options:{responsive:true,animation:{duration:250},
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:(ctx)=>`${ctx.formattedValue} ${unidad}`}}},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:(ctx)=>esDuracion?formatMinutos(ctx.parsed.y):`${ctx.formattedValue} ${unidad}`}}},
       scales:{x:{ticks:{color:cTick,maxRotation:60},grid:{display:false}},
-              y:{ticks:{color:cTick},grid:{color:cGrid},title:{display:true,text:unidad,color:cTick}}}}
+              y:{ticks:ticksY,grid:{color:cGrid},title:{display:true,text:unidad,color:cTick}}}}
   });
 }
 function renderDashboardLocal(hoy) {
-  const regsHoy=S.staged.filter(r=>r.fchIrr===hoy);
+  const regsHoy=stagedVisible().filter(r=>r.fchIrr===hoy);
   document.getElementById('kpiHoy').textContent=regsHoy.length;
   document.getElementById('kpiCompletas').textContent=regsHoy.filter(r=>r.hFin).length;
   const pendAt=new Set(LS.pending().map(p=>p.at));
@@ -846,9 +1084,9 @@ function renderActividadReciente(items) {
   if(!items.length){ el.innerHTML='<div class="remp">Sin actividad todavía hoy</div>'; return; }
   el.innerHTML=items.map(it=>`
     <div class="act-item" onclick="go('hist')">
-      <div class="act-time">${it.hora||'--:--'}</div>
+      <div class="act-time">${esc(it.hora)||'--:--'}</div>
       <div class="act-body">
-        <div class="act-title">${it.urnas||'—'} urna${it.urnas===1?'':'s'} · ${it.dosis||'—'} Gy${it.conductor?' · '+it.conductor:''}</div>
+        <div class="act-title">${esc(it.urnas)||'—'} urna${it.urnas===1?'':'s'} · ${esc(it.dosis)||'—'} Gy${it.conductor?' · '+esc(it.conductor):''}</div>
       </div>
       <span class="badge ${it.sync?'badge-success':'badge-warning'}">${it.sync?'✓ Sincronizado':'⚠ Pendiente'}</span>
     </div>`).join('');
@@ -927,7 +1165,7 @@ function renderUrnaPanel(key,color) {
   return `
     <div style="display:flex;flex-direction:column;gap:18px">
       <div class="fl"><label>Número de urnas</label>
-        <input type="number" id="${key}N" min="0" value="${u.n||''}" placeholder="0"
+        <input type="number" id="${key}N" min="0" value="${esc(u.n||'')}" placeholder="0"
           style="font-size:17px;padding:12px 14px;border-color:${color}66"
           oninput="uNum('${key}')"></div>
       <div class="fl"><label>Fecha de sexado</label>
@@ -936,7 +1174,7 @@ function renderUrnaPanel(key,color) {
           oninput="uDate('${key}')"></div>
       <div class="fl"><label>Lote — sexado menos 6 días (auto)</label>
         <div class="cfr">
-          <input type="text" id="${key}L" readonly value="${u.lote||''}"
+          <input type="text" id="${key}L" readonly value="${esc(u.lote||'')}"
             placeholder="Selecciona fecha de sexado"
             style="font-size:16px;padding:12px 14px;border-color:${color}88;
                    color:#E0E6FF;background:#0D1020;padding-right:58px">
@@ -946,7 +1184,7 @@ function renderUrnaPanel(key,color) {
       <div style="background:${color}18;border:1px solid ${color}44;border-radius:var(--rsm);
         padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
         <span style="font-size:13px;color:rgba(255,255,255,.6)">Urnas en esta entrada</span>
-        <span style="font-family:var(--fh);font-size:22px;font-weight:700;color:${color}">${u.n||'0'}</span>
+        <span style="font-family:var(--fh);font-size:22px;font-weight:700;color:${color}">${esc(u.n||'0')}</span>
       </div>`:''}
     </div>`;
 }
@@ -1033,8 +1271,8 @@ function renderUrnaCards() {
         <span class="urna-card-num">${String(i+1).padStart(2,'0')}</span>
         <span class="urna-card-status">${filled?'✓':'—'}</span>
       </div>
-      <div class="urna-card-qty">${u.n?u.n+' unidades':'Sin datos'}</div>
-      ${u.lote?`<div class="urna-card-lote">Lote ${u.lote}</div>`:''}
+      <div class="urna-card-qty">${u.n?esc(u.n)+' unidades':'Sin datos'}</div>
+      ${u.lote?`<div class="urna-card-lote">Lote ${esc(u.lote)}</div>`:''}
     </button>`;
   }).join('');
 }
@@ -1055,7 +1293,7 @@ function updChips() {
     if(u.n||u.date){
       chip.className='uchip filled';
       chip.style.cssText=`background:${color}22;border-color:${color}88;color:#fff`;
-      chip.innerHTML=`<span style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0"></span>${label}: ${u.n||'0'}`;
+      chip.innerHTML=`<span style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0"></span>${label}: ${esc(u.n||'0')}`;
     } else {
       chip.className='uchip empty'; chip.style.cssText='';
       chip.innerHTML=`<span style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;opacity:.4"></span>${label}`;
@@ -1096,7 +1334,36 @@ function setBtnLoading(id, loading, loadingText) {
   }
 }
 
+// Validación antes de guardar: solo la fecha es obligatoria (lo demás se puede completar luego),
+// pero lo que se escriba debe tener sentido. Se marca el campo y se lleva al paso donde está.
+function limpiarInvalidos() { document.querySelectorAll('.inv').forEach(e=>e.classList.remove('inv')); }
+function marcarInvalido(id, paso, mensaje) {
+  const el=document.getElementById(id);
+  const btn=document.querySelector(`.step[data-step="${paso}"]`);
+  if(btn) stab(paso, btn);
+  if(el){
+    el.classList.add('inv');
+    try{ el.focus(); }catch{}
+    el.addEventListener('input',()=>el.classList.remove('inv'),{once:true});
+  }
+  toast('⚠ '+mensaje);
+}
+function validarFormularioRegistro() {
+  limpiarInvalidos();
+  if(!document.getElementById('fchIrr').value){ marcarInvalido('fchIrr','urnas','Indica la fecha de irradiación para guardar'); return false; }
+  const dos=document.getElementById('fDos').value;
+  if(dos!=='' && !/^\d+$/.test(dos)){ marcarInvalido('fDos','irradia','Los dosímetros deben ser un número entero'); return false; }
+  const rangos=[['fTi','temp','La temperatura inicial',-100,200],['fTf','temp','La temperatura final',-100,200],['fExpUsv','irradia','La exposición (µSv)',0,1e6]];
+  for(const [id,paso,etiqueta,min,max] of rangos){
+    const v=document.getElementById(id).value;
+    if(v==='') continue;
+    const n=parseFloat(v);
+    if(isNaN(n)||n<min||n>max){ marcarInvalido(id,paso,`${etiqueta} no es válida`); return false; }
+  }
+  return true;
+}
 async function guardar() {
+  if(!validarFormularioRegistro()) return;
   const t=urnaTotal();
   const tiV=parseFloat(document.getElementById('fTi').value);
   const tfV=parseFloat(document.getElementById('fTf').value);
@@ -1139,6 +1406,8 @@ async function guardar() {
     tm,
     // Metadatos
     at: new Date().toISOString(),
+    uid: nuevoUid(),          // evita duplicados si hay que reintentar el envío
+    by: S.user,               // quién lo hizo en este dispositivo
   };
   setBtnLoading('gbtn', true, S.editingId?'Actualizando…':'Guardando…');
 
@@ -1146,6 +1415,7 @@ async function guardar() {
     try{
       await apiPost('/registros',{action:'actualizar',token:LS.token(),payload:{id:S.editingId,registro:rec}});
       setCloudState('ok');
+      invalidarCacheDashboard();
       toast('✓ Registro actualizado');
     }catch(e){
       setCloudState(e.isNetwork?'off':'err');
@@ -1181,8 +1451,10 @@ function limpiarForm() {
   renderUrnaCards();
   stab('urnas', document.querySelector('.step[data-step="urnas"]'));
 }
+// Los registros guardados en este dispositivo solo los ve quien los hizo (en equipos compartidos).
+function stagedVisible() { return S.staged.filter(r=>!r.by || !S.user || r.by===S.user); }
 function updStagedUI() {
-  const n=S.staged.length;
+  const n=stagedVisible().length;
   const sb=document.getElementById('sbdg'),be=document.getElementById('bexp'),
         rc=document.getElementById('rcnt'),gc=document.getElementById('gcnt');
   if(n>0){
@@ -1197,7 +1469,7 @@ function updStagedUI() {
 const EX_LABELS={form:'Formulario',month:'Dosis mensual',weekly:'Tabla anual',hist:'Historial',informes:'Informes'};
 
 function openExDlg(ctx) {
-  if(ctx==='form'&&!S.staged.length){toast('No hay registros para exportar');return;}
+  if(ctx==='form'&&!stagedVisible().length){toast('No hay registros para exportar');return;}
   S.exCtx=ctx;
   document.getElementById('exctx').textContent=EX_LABELS[ctx]||'';
   document.getElementById('exov').classList.add('on');
@@ -1210,7 +1482,7 @@ async function doExport(fmt_) {
   let filename='', content='', mime='', bytes=0;
   if(ctx==='form'){
     if(fmt_==='csv')       {[content,mime]=buildFormCSV();  filename=`irradiacion_${dateStamp()}.csv`;}
-    else if(fmt_==='json') {content=JSON.stringify(S.staged,null,2);mime='application/json';filename=`irradiacion_${dateStamp()}.json`;}
+    else if(fmt_==='json') {content=JSON.stringify(stagedVisible().map(({by,uid,...r})=>r),null,2);mime='application/json';filename=`irradiacion_${dateStamp()}.json`;}
     else                   {content=buildFormTXT();mime='text/plain;charset=utf-8;';filename=`irradiacion_${dateStamp()}.txt`;}
   } else if(ctx==='month'){
     if(fmt_==='csv')       {[content,mime]=buildMonthCSV(); filename=`dosis_mensual_${dateStamp()}.csv`;}
@@ -1270,18 +1542,13 @@ function showSaveDlg(filename,fmt_,bytes,ctx,result) {
   const kbSize=(bytes/1024).toFixed(1);
   const now=new Date();
   const ts=`${String(now.getDate()).padStart(2,'0')}/${String(now.getMonth()+1).padStart(2,'0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+  // El navegador no dice dónde deja el archivo descargado: solo se muestra una ruta si el usuario la eligió.
   let fullPath, saveMethod;
   if(result&&result.method==='picker'){
-    fullPath=result.path||filename; saveMethod='📁 Guardado en ubicación elegida';
-  } else if(isMobile()){
-    const isA=/Android/i.test(navigator.userAgent), isI=/iPad|iPhone|iPod/.test(navigator.userAgent);
-    fullPath=isA?`/sdcard/Download/${filename}`:isI?`Archivos → En mi iPhone → Descargas`:`Carpeta Descargas`;
-    saveMethod='📥 Descargado automáticamente';
+    fullPath=result.path||filename; saveMethod='📁 Guardado en la ubicación elegida';
   } else {
-    const osF=navigator.userAgent.includes('Win')?`C:\\Users\\${S.user||'Usuario'}\\Downloads\\`:
-               navigator.userAgent.includes('Mac')?`/Users/${S.user||'usuario'}/Downloads/`:
-               `/home/${(S.user||'usuario').toLowerCase()}/Downloads/`;
-    fullPath=osF+filename; saveMethod='📥 Guardado en Descargas';
+    fullPath=`Carpeta de descargas de tu ${isMobile()?'dispositivo':'navegador'} → ${filename}`;
+    saveMethod='📥 Descargado por el navegador';
   }
   const extEl=document.getElementById('scFext');
   extEl.textContent=fmtU; extEl.className=`fext ${fmt_}`;
@@ -1290,8 +1557,8 @@ function showSaveDlg(filename,fmt_,bytes,ctx,result) {
   document.getElementById('scTerm').innerHTML=`
     <div class="term-line"><span class="term-prompt">$</span><span class="term-cmd">vi-export --format ${fmt_} --source ${ctx}</span></div>
     <div class="term-line" style="margin-top:4px"><span class="term-prompt"> </span><span class="term-out">[INFO] Generando ${fmtU} · ${bytes.toLocaleString()} bytes · UTF-8 BOM</span></div>
-    <div class="term-line" style="margin-top:4px"><span class="term-prompt"> </span><span class="term-out">[INFO] ${saveMethod}</span></div>
-    <div class="term-line" style="margin-top:4px"><span class="term-prompt">$</span><span class="term-cmd">ruta → <span class="term-path">${fullPath}</span></span></div>
+    <div class="term-line" style="margin-top:4px"><span class="term-prompt"> </span><span class="term-out">[INFO] ${esc(saveMethod)}</span></div>
+    <div class="term-line" style="margin-top:4px"><span class="term-prompt">$</span><span class="term-cmd">ruta → <span class="term-path">${esc(fullPath)}</span></span></div>
     <div class="term-line" style="margin-top:4px"><span class="term-prompt"> </span><span class="term-ok">✔ Archivo guardado correctamente</span></div>
     <div class="term-line" style="margin-top:4px"><span class="term-prompt"> </span><span class="term-dim">${ts}<span class="term-cursor"></span></span></div>`;
   document.getElementById('scov').classList.add('on');
@@ -1310,7 +1577,7 @@ function buildFormCSV() {
     'Tª Ini(°C)','Tª Fin(°C)','Tª Media(°C)',
     'Irradiador','Dosímetros','H.Ini Irr.','H.Fin Irr.','Observaciones'
   ];
-  const rows=S.staged.map(r=>[
+  const rows=stagedVisible().map(r=>[
     r.fchIrr?fmt(pd(r.fchIrr)):'', r.semana||'',
     r.tasa?parseFloat(r.tasa).toFixed(8):'', r.texp||'',
     r.nUrnas||'',
@@ -1321,11 +1588,11 @@ function buildFormCSV() {
     r.ti||'', r.tf||'', r.tm||'',
     r.irr||'', r.dos||'', r.hIni||'', r.hFin||'', r.obs||''
   ]);
-  return [[h,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\r\n'),'text/csv;charset=utf-8;'];
+  return [[h,...rows].map(csvFila).join('\r\n'),'text/csv;charset=utf-8;'];
 }
 
 function buildFormTXT() {
-  return S.staged.map((r,i)=>{
+  return stagedVisible().map((r,i)=>{
     const sep='─'.repeat(48);
     const fIrr=r.fchIrr?fmt(pd(r.fchIrr)):'—';
     return [
@@ -1410,29 +1677,39 @@ function buildWeeklyTXT() {
 // ── RECORDS ───────────────────────────────────────────
 function renderRecs() {
   const list=document.getElementById('recList');
-  if(!S.staged.length){list.innerHTML='<div class="remp">No hay registros guardados</div>';return;}
+  const locales=stagedVisible();
+  if(!locales.length){list.innerHTML='<div class="remp">No hay registros guardados</div>';return;}
   const pendAt=new Set(LS.pending().map(p=>p.at));
-  list.innerHTML=S.staged.map((r,i)=>{
+  const rechazos=new Map(LS.rejected().map(r=>[r.at,r.rechazo]));
+  list.innerHTML=locales.map((r,i)=>{
     const fIrr=r.fchIrr?fmt(pd(r.fchIrr)):'Sin fecha';
-    const sync=!LS.token()?'':(pendAt.has(r.at)?'<span class="cloudbdg off" style="margin-left:8px">⏳ pendiente</span>':'<span class="cloudbdg ok" style="margin-left:8px">☁ sincronizado</span>');
+    let sync='';
+    if(rechazos.has(r.at)) sync=`<span class="cloudbdg err" style="margin-left:8px" title="${esc(rechazos.get(r.at))}">⚠ rechazado por el servidor</span>`;
+    else if(LS.token()||pendAt.has(r.at)) sync=pendAt.has(r.at)?'<span class="cloudbdg off" style="margin-left:8px">⏳ pendiente</span>':'<span class="cloudbdg ok" style="margin-left:8px">☁ sincronizado</span>';
+    const motivo=rechazos.has(r.at)?`<div class="robs">⚠ ${esc(rechazos.get(r.at))} — corrígelo y vuelve a guardarlo.</div>`:'';
     return `<div class="ritem">
-      <div class="rdate">📋 ${fIrr} — Sem. ${r.semana||'?'}${sync}</div>
+      <div class="rdate">📋 ${esc(fIrr)} — Sem. ${esc(r.semana||'?')}${sync}</div>
       <div class="rdets">
-        <span>Urnas: <strong>${r.nUrnas||'—'}</strong></span>
-        <span>Tiempo: <strong>${r.texp||'—'} s</strong></span>
-        <span>Tasa: <strong>${r.tasa?parseFloat(r.tasa).toFixed(5):'—'} Gy/s</strong></span>
-        <span>Dosím.: <strong>${r.dos||'—'}</strong></span>
-        <span>Conductor: <strong>${r.resp||'—'}${r.respCodigo?` (${r.respCodigo})`:''}</strong></span>
-        <span>Tª media: <strong>${r.tm||'—'} °C</strong></span>
+        <span>Urnas: <strong>${esc(r.nUrnas||'—')}</strong></span>
+        <span>Tiempo: <strong>${esc(r.texp||'—')} s</strong></span>
+        <span>Tasa: <strong>${r.tasa?esc(parseFloat(r.tasa).toFixed(5)):'—'} Gy/s</strong></span>
+        <span>Dosím.: <strong>${esc(r.dos||'—')}</strong></span>
+        <span>Conductor: <strong>${esc(r.resp||'—')}${r.respCodigo?` (${esc(r.respCodigo)})`:''}</strong></span>
+        <span>Tª media: <strong>${esc(r.tm||'—')} °C</strong></span>
       </div>
-      ${r.obs?`<div class="robs">📝 ${r.obs.substring(0,100)}${r.obs.length>100?'…':''}</div>`:''}</div>`;
+      ${motivo}
+      ${r.obs?`<div class="robs">📝 ${esc(r.obs.substring(0,100))}${r.obs.length>100?'…':''}</div>`:''}</div>`;
   }).join('<div style="height:8px"></div>');
 }
 async function clearRecs() {
-  const ok=await confirmDialog('¿Eliminar todos los registros guardados en este dispositivo?',
+  const ok=await confirmDialog('¿Eliminar los registros guardados en este dispositivo? Los que ya estén sincronizados seguirán en la nube; los pendientes de enviar se enviarán igualmente.',
     {title:'Eliminar registros',okText:'Eliminar todos',okClass:'br'});
   if(!ok) return;
-  S.staged=[]; LS.setS([]); updStagedUI(); renderRecs(); toast('Registros eliminados');
+  const visibles=new Set(stagedVisible());
+  S.staged=S.staged.filter(r=>!visibles.has(r)); LS.setS(S.staged);
+  const vis=new Set([...visibles].map(r=>r.at));
+  LS.setRejected(LS.rejected().filter(r=>!vis.has(r.at)));
+  updStagedUI(); renderRecs(); toast('Registros eliminados de este dispositivo');
 }
 
 // ── HISTORIAL (registros guardados en Supabase, filtrables por fecha y otros campos) ──
@@ -1452,6 +1729,7 @@ async function buscarHistorial() {
     const data=await apiPost('/registros',{action:'listar',token:LS.token(),payload:{desde,hasta}});
     setCloudState('ok');
     S.histRaw=data.registros||[];
+    S.histTruncado=!!data.truncado;
     poblarFiltrosHistorial(S.histRaw);
     aplicarFiltrosHistorial();
   }catch(e){
@@ -1463,7 +1741,7 @@ async function buscarHistorial() {
 function filtroHistorialRapido() {
   const hoy=new Date();
   const hace30=new Date(); hace30.setDate(hoy.getDate()-30);
-  const iso=d=>d.toISOString().slice(0,10);
+  const iso=tod;
   document.getElementById('hDesde').value=iso(hace30);
   document.getElementById('hHasta').value=iso(hoy);
   buscarHistorial();
@@ -1476,9 +1754,9 @@ function poblarFiltrosHistorial(regs) {
   const conductores=[...new Map(regs.filter(r=>r.conductor_nick).map(r=>[r.conductor_nick,r.conductor_nombre||r.conductor_nick])).entries()];
   const usuarios=[...new Set(regs.map(r=>r.creado_por).filter(Boolean))].sort();
   const irradiadores=[...new Set(regs.map(r=>r.irradiador_nombre||r.irradiador).filter(Boolean))].sort();
-  condSel.innerHTML='<option value="">Todos</option>'+conductores.map(([nick,nom])=>`<option value="${nick}">${nom}</option>`).join('');
-  usrSel.innerHTML='<option value="">Todos</option>'+usuarios.map(u=>`<option value="${u}">${u}</option>`).join('');
-  irrSel.innerHTML='<option value="">Todos</option>'+irradiadores.map(i=>`<option value="${i}">${i}</option>`).join('');
+  condSel.innerHTML='<option value="">Todos</option>'+conductores.map(([nick,nom])=>`<option value="${esc(nick)}">${esc(nom)}</option>`).join('');
+  usrSel.innerHTML='<option value="">Todos</option>'+usuarios.map(u=>`<option value="${esc(u)}">${esc(u)}</option>`).join('');
+  irrSel.innerHTML='<option value="">Todos</option>'+irradiadores.map(i=>`<option value="${esc(i)}">${esc(i)}</option>`).join('');
   if(conductores.some(([nick])=>nick===condActual)) condSel.value=condActual;
   if(usuarios.includes(usrActual)) usrSel.value=usrActual;
   if(irradiadores.includes(irrActual)) irrSel.value=irrActual;
@@ -1512,7 +1790,7 @@ function aplicarFiltrosHistorial() {
   calcularTotalesHistorial(regs);
   if(S.histVista==='graf') dibujarGraficaHistorial();
   const note=document.getElementById('histNote');
-  if(note) note.textContent=`${regs.length} registro(s) encontrado(s)`;
+  if(note) note.textContent=`${regs.length} registro(s) encontrado(s)`+(S.histTruncado?' — hay más de 10 000 en este periodo: acota las fechas para verlos todos':'');
 }
 function minutosEntre(hIni, hFin) {
   if(!hIni||!hFin) return 0;
@@ -1524,7 +1802,7 @@ function minutosEntre(hIni, hFin) {
   return mins;
 }
 // Campo calculado del paso "Irradiación": diferencia entre H. inicio y H.
-// fin de irradiación, en horas (con 2 decimales) y su conversión a minutos.
+// fin de irradiación, en formato h:mm (p. ej. 0:20).
 function calcDuracionIrr() {
   const el=document.getElementById('fDuracionIrr');
   if(!el) return;
@@ -1532,11 +1810,11 @@ function calcDuracionIrr() {
   const hFin=document.getElementById('fHfin').value;
   if(!hIni||!hFin){ el.value=''; return; }
   const mins=minutosEntre(hIni,hFin);
-  el.value=`${(mins/60).toFixed(2)} h (${mins} min)`;
+  el.value=formatHorasHM(mins/60);
 }
+// Minutos -> "h:mm" (mismo formato que en Fichaje e Informes): 80 -> "1:20"
 function formatMinutos(mins) {
-  const h=Math.floor(mins/60), m=Math.round(mins%60);
-  return `${h}h ${m}min`;
+  return formatHorasHM((parseFloat(mins)||0)/60);
 }
 function calcularTotalesHistorial(regs) {
   const wrap=document.getElementById('histTotalesWrap');
@@ -1596,10 +1874,10 @@ function renderHistorial(regs) {
     const fIrr=r.fecha_irradiacion?fmt(pd(r.fecha_irradiacion)):'Sin fecha';
     const dosis=dosisRegistro(r);
     const completa=estadoRegistro(r)==='completa';
-    return `<tr onclick="abrirDetalleRegistro('${r.id}')">
-      <td>${fIrr}</td>
-      <td>${r.conductor_nombre||'<span class="td-muted">—</span>'}</td>
-      <td>${r.n_urnas||'—'}</td>
+    return `<tr onclick="abrirDetalleRegistro('${escJs(r.id)}')">
+      <td>${esc(fIrr)}</td>
+      <td>${r.conductor_nombre?esc(r.conductor_nombre):'<span class="td-muted">—</span>'}</td>
+      <td>${esc(r.n_urnas||'—')}</td>
       <td>${dosis?dosis+' Gy':'<span class="td-muted">—</span>'}</td>
       <td><span class="badge ${completa?'badge-success':'badge-caution'}">${completa?'✓ Completada':'! Incompleta'}</span></td>
     </tr>`;
@@ -1608,17 +1886,17 @@ function renderHistorial(regs) {
   box.innerHTML=regs.map(r=>{
     const fIrr=r.fecha_irradiacion?fmt(pd(r.fecha_irradiacion)):'Sin fecha';
     const completa=estadoRegistro(r)==='completa';
-    return `<div class="ritem" style="cursor:pointer" onclick="abrirDetalleRegistro('${r.id}')">
-      <div class="rdate">📋 ${fIrr} — Sem. ${r.semana_iso||'?'} <span style="color:var(--txt3);font-weight:400">· guardado por ${r.creado_por||'—'}</span></div>
+    return `<div class="ritem" style="cursor:pointer" onclick="abrirDetalleRegistro('${escJs(r.id)}')">
+      <div class="rdate">📋 ${esc(fIrr)} — Sem. ${esc(r.semana_iso||'?')} <span style="color:var(--txt3);font-weight:400">· guardado por ${esc(r.creado_por||'—')}</span></div>
       <div class="rdets">
-        <span>Urnas: <strong>${r.n_urnas||'—'}</strong></span>
-        <span>Tiempo: <strong>${r.tiempo_exposicion||'—'} s</strong></span>
-        <span>Tasa: <strong>${r.tasa?parseFloat(r.tasa).toFixed(5):'—'} Gy/s</strong></span>
-        <span>Dosím.: <strong>${r.dosimetros||'—'}</strong></span>
-        <span>Conductor: <strong>${r.conductor_nombre||'—'}${r.conductor_codigo?` (${r.conductor_codigo})`:''}</strong></span>
-        <span>Tª media: <strong>${r.temp_media||'—'} °C</strong></span>
+        <span>Urnas: <strong>${esc(r.n_urnas||'—')}</strong></span>
+        <span>Tiempo: <strong>${esc(r.tiempo_exposicion||'—')} s</strong></span>
+        <span>Tasa: <strong>${r.tasa?esc(parseFloat(r.tasa).toFixed(5)):'—'} Gy/s</strong></span>
+        <span>Dosím.: <strong>${esc(r.dosimetros||'—')}</strong></span>
+        <span>Conductor: <strong>${esc(r.conductor_nombre||'—')}${r.conductor_codigo?` (${esc(r.conductor_codigo)})`:''}</strong></span>
+        <span>Tª media: <strong>${esc(r.temp_media||'—')} °C</strong></span>
       </div>
-      ${r.observaciones?`<div class="robs">📝 ${r.observaciones.substring(0,100)}${r.observaciones.length>100?'…':''}</div>`:''}
+      ${r.observaciones?`<div class="robs">📝 ${esc(r.observaciones.substring(0,100))}${r.observaciones.length>100?'…':''}</div>`:''}
       <div style="margin-top:8px"><span class="badge ${completa?'badge-success':'badge-caution'}">${completa?'✓ Completada':'! Incompleta'}</span></div>
       </div>`;
   }).join('<div style="height:8px"></div>');
@@ -1630,6 +1908,7 @@ async function eliminarHistorialRegistro(id) {
   try{
     await apiPost('/registros',{action:'eliminar',token:LS.token(),payload:{id}});
     setCloudState('ok');
+    invalidarCacheDashboard();
     toast('Registro eliminado');
     buscarHistorial();
   }catch(e){
@@ -1647,7 +1926,7 @@ function abrirDetalleRegistro(id) {
   const dosis=dosisRegistro(r);
   document.getElementById('detSub').textContent=`${fIrr} · guardado por ${r.creado_por||'—'} el ${r.created_at?new Date(r.created_at).toLocaleString('es-ES'):'—'}`;
 
-  const item=(lbl,val)=>`<div><div class="det-item-lbl">${lbl}</div><div class="det-item-val">${val!=null&&val!==''?val:'—'}</div></div>`;
+  const item=(lbl,val)=>`<div><div class="det-item-lbl">${esc(lbl)}</div><div class="det-item-val">${val!=null&&val!==''?esc(val):'—'}</div></div>`;
 
   document.getElementById('detBody').innerHTML=`
     <div class="det-sect">
@@ -1692,7 +1971,7 @@ function abrirDetalleRegistro(id) {
         ${item('H. fin irr.', r.h_fin_irr)}
       </div>
     </div>
-    ${r.observaciones?`<div class="det-sect"><div class="det-sect-hd">Observaciones</div><div class="det-obs">${r.observaciones}</div></div>`:''}
+    ${r.observaciones?`<div class="det-sect"><div class="det-sect-hd">Observaciones</div><div class="det-obs">${esc(r.observaciones)}</div></div>`:''}
   `;
   document.getElementById('detOv').classList.add('on');
 }
@@ -1746,7 +2025,7 @@ function duplicarRegistroDesdeDetalle() {
 async function exportarRegistroDesdeDetalle() {
   const r=S.detRegistro; if(!r) return;
   const {header,rows}=buildHistRows([r]);
-  const content=[header,...rows].map(row=>row.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  const content=[header,...rows].map(csvFila).join('\r\n');
   const filename=`registro_${r.id.slice(0,8)}.csv`;
   const result=await dlFile(filename,content,'text/csv;charset=utf-8;');
   if(result===null) return;
@@ -1760,7 +2039,7 @@ async function eliminarRegistroDesdeDetalle() {
 
 // ── GRÁFICAS DEL HISTORIAL ─────────────────────────────
 let histChartInstance=null;
-function cambiarVistaHistorial(vista) {
+async function cambiarVistaHistorial(vista) {
   S.histVista=vista;
   document.getElementById('hTabLista').className='btn bs '+(vista==='lista'?'bp':'bo');
   document.getElementById('hTabGraf').className='btn bs '+(vista==='graf'?'bp':'bo');
@@ -1768,7 +2047,7 @@ function cambiarVistaHistorial(vista) {
   document.getElementById('histChartWrap').style.display=vista==='graf'?'':'none';
   document.getElementById('hGrafSelWrap').style.display=vista==='graf'?'':'none';
   if(vista==='graf'){
-    if(!window.Chart){ toast('⚠ No se pudo cargar la librería de gráficas (revisa tu conexión a internet)'); return; }
+    if(!window.Chart){ try{ await cargarLib('chart'); }catch{ toast('⚠ No se pudo cargar la librería de gráficas (revisa tu conexión a internet)'); return; } }
     dibujarGraficaHistorial();
   }
 }
@@ -1868,7 +2147,7 @@ async function exportHistCSV() {
   const regs=S.histFiltered||[];
   if(!regs.length){toast('No hay registros para exportar');return;}
   const {header,rows}=buildHistRows(regs);
-  const content=[header,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  const content=[header,...rows].map(csvFila).join('\r\n');
   const filename=`historial_${dateStamp()}.csv`;
   const result=await dlFile(filename,content,'text/csv;charset=utf-8;');
   if(result===null) return;
@@ -1877,7 +2156,7 @@ async function exportHistCSV() {
 async function exportHistXLSX() {
   const regs=S.histFiltered||[];
   if(!regs.length){toast('No hay registros para exportar');return;}
-  if(!window.XLSX){toast('⚠ No se pudo cargar la librería de Excel (revisa tu conexión a internet)');return;}
+  if(!window.XLSX){ try{ await cargarLib('xlsx'); }catch{ toast('⚠ No se pudo cargar la librería de Excel (revisa tu conexión a internet)'); return; } }
   const {header,rows}=buildHistRows(regs);
   const ws=XLSX.utils.aoa_to_sheet([header,...rows]);
   ws['!cols']=header.map(()=>({wch:16}));
@@ -1901,11 +2180,13 @@ function cargarLogoInforme(ruta) {
     const img = new Image();
     img.onload = () => {
       try {
+        // Se dibuja como mucho a 256 px de ancho: de sobra para los 64 pt que ocupa en el PDF.
+        const esc_ = Math.min(1, 256 / img.naturalWidth);
+        const w = Math.max(1, Math.round(img.naturalWidth * esc_)), h = Math.max(1, Math.round(img.naturalHeight * esc_));
         const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        canvas.getContext('2d').drawImage(img, 0, 0);
-        resolve({ dataURL: canvas.toDataURL('image/png'), w: img.naturalWidth, h: img.naturalHeight });
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve({ dataURL: canvas.toDataURL('image/png'), w, h });
       } catch (e) { resolve(null); } // p.ej. restricciones de lienzo en algunos navegadores
     };
     img.onerror = () => resolve(null); // sin conexión / imagen no disponible: el PDF se genera igualmente
@@ -1936,10 +2217,10 @@ function dibujarCabeceraPDF(doc, logo, titulo) {
 async function exportHistPDF() {
   const regs=S.histFiltered||[];
   if(!regs.length){toast('No hay registros para exportar');return;}
-  if(!window.jspdf){toast('⚠ No se pudo cargar la librería de PDF (revisa tu conexión a internet)');return;}
+  if(!window.jspdf){ try{ await cargarLib('pdf'); }catch{ toast('⚠ No se pudo cargar la librería de PDF (revisa tu conexión a internet)'); return; } }
   const {header,rows}=buildHistRows(regs);
   const {jsPDF}=window.jspdf;
-  const doc=new jsPDF({orientation:'landscape',unit:'pt'});
+  const doc=new jsPDF({orientation:'landscape',unit:'pt',compress:true});
   const logo=await cargarLogoInforme('img/logo_tie_mosquito.png');
   const {tablaY}=dibujarCabeceraPDF(doc, logo, 'Values Irradiation WEB-210 — Historial');
   doc.autoTable({head:[header],body:rows,startY:tablaY,styles:{fontSize:7,cellPadding:3},headStyles:{fillColor:[76,110,245]}});
@@ -1980,11 +2261,10 @@ const CAMPOS_INFORME=[
   {id:'texpReal',     label:'Tiempo exposición real (s)',    grupo:'Irradiación', get:r=>r.tiempo_exposicion_real??'', sumable:true},
   {id:'hIniIrr',      label:'H. inicio irradiación',     grupo:'Irradiación', get:r=>r.h_inicio_irr||''},
   {id:'hFinIrr',      label:'H. fin irradiación',        grupo:'Irradiación', get:r=>r.h_fin_irr||''},
-  {id:'duracionIrr',  label:'Duración irradiación (h / min)', grupo:'Irradiación', sumable:true,
+  {id:'duracionIrr',  label:'Duración irradiación (h:mm)', grupo:'Irradiación', sumable:true, formato:'hm',
     get:r=>{
       if(!r.h_inicio_irr||!r.h_fin_irr) return '';
-      const mins=minutosEntre(r.h_inicio_irr,r.h_fin_irr);
-      return `${(mins/60).toFixed(2)} h (${mins} min)`;
+      return formatHorasHM(minutosEntre(r.h_inicio_irr,r.h_fin_irr)/60);
     },
     sum:r=>(r.h_inicio_irr&&r.h_fin_irr)?minutosEntre(r.h_inicio_irr,r.h_fin_irr)/60:0},
   {id:'expUsv',       label:'Exposición operador (µSv)', grupo:'Irradiación', get:r=>r.exposicion_usv??'', sumable:true},
@@ -2006,7 +2286,9 @@ const CAMPOS_INFORME_FICHAJES=[
   {id:'horaSalida',       label:'Hora salida',                  grupo:'Fichaje', get:r=>r.hora_salida||''},
   {id:'horarioEntradaEsp',label:'Horario de entrada esperado',  grupo:'Fichaje', get:r=>r.horario_entrada_esperado||''},
   {id:'horarioEsperado',  label:'Horario de salida esperado',   grupo:'Fichaje', get:r=>r.horario_salida_esperado||''},
-  {id:'horasDeMas',       label:'Horas de más',                 grupo:'Fichaje', get:r=>r.horas_de_mas!=null?parseFloat(r.horas_de_mas).toFixed(2):'', sumable:true},
+  {id:'horasDeMas',       label:'Horas de más (h:mm)',          grupo:'Fichaje', sumable:true, formato:'hm',
+    get:r=>(r.horas_de_mas!=null&&r.horas_de_mas!=='')?formatHorasHM(r.horas_de_mas):'',
+    sum:r=>parseFloat(r.horas_de_mas)||0},
 ];
 // Catálogo de campos activo según el tipo de informe elegido.
 function camposInformeCatalogo() {
@@ -2057,6 +2339,9 @@ function camposASumar() {
   const incluidos=camposInformeSeleccionados().map(c=>c.id);
   return marcados.filter(id=>incluidos.includes(id));
 }
+// Los campos con formato:'hm' son duraciones (horas decimales internamente) y se muestran SIEMPRE como
+// h:mm — en las filas y también en el total: 0.5 -> "0:30", 7.75 -> "7:45", -0.62 -> "-0:37".
+function formatearSuma(campo, valor) { return campo.formato==='hm' ? formatHorasHM(valor) : valor.toFixed(2); }
 function sumarCampo(campo, regs) {
   return regs.reduce((acc,r)=>{
     const bruto=campo.sum?campo.sum(r):campo.get(r);
@@ -2105,13 +2390,13 @@ function renderVistaPreviaInforme() {
     // que se ven en la vista previa (que puede estar recortada).
     const celdas=campos.map((c,i)=>{
       const suma=sumIds.includes(c.id);
-      if(i===0) return `<td style="font-weight:700">${suma?`Total: ${sumarCampo(c,regs).toFixed(2)}`:'Total'}</td>`;
-      return suma?`<td class="tdSuma">${sumarCampo(c,regs).toFixed(2)}</td>`:'<td></td>';
+      if(i===0) return `<td style="font-weight:700">${suma?`Total: ${formatearSuma(c,sumarCampo(c,regs))}`:'Total'}</td>`;
+      return suma?`<td class="tdSuma">${formatearSuma(c,sumarCampo(c,regs))}</td>`:'<td></td>';
     });
     tfoot=`<tfoot><tr>${celdas.join('')}</tr></tfoot>`;
   }
   tabla.innerHTML=`<thead><tr>${campos.map(c=>`<th>${c.label}</th>`).join('')}</tr></thead>`+
-    `<tbody>${filas.map(r=>`<tr>${campos.map(c=>`<td>${c.get(r)??''}</td>`).join('')}</tr>`).join('')}</tbody>`+tfoot;
+    `<tbody>${filas.map(r=>`<tr>${campos.map(c=>`<td>${esc(c.get(r))}</td>`).join('')}</tr>`).join('')}</tbody>`+tfoot;
   const notaRecorte = regs.length>VISTA_PREVIA_LIMITE
     ? `Mostrando los primeros ${VISTA_PREVIA_LIMITE} de ${regs.length} registros (el informe exportado incluye todos).`
     : `${regs.length} registro(s)`;
@@ -2141,14 +2426,14 @@ async function buscarInformes() {
     let items;
     if(S.informesTipo==='fichajes'){
       const data=await apiPost('/fichajes',{action:'listar',token:LS.token(),payload:{desde,hasta}});
-      items=data.fichajes||[];
+      items=data.fichajes||[]; S.informesTruncado=!!data.truncado;
     }else{
       const data=await apiPost('/registros',{action:'listar',token:LS.token(),payload:{desde,hasta}});
-      items=data.registros||[];
+      items=data.registros||[]; S.informesTruncado=!!data.truncado;
     }
     setCloudState('ok');
     S.informesRaw=items;
-    note.textContent=`${S.informesRaw.length} registro(s) encontrado(s)`;
+    note.textContent=`${S.informesRaw.length} registro(s) encontrado(s)`+(S.informesTruncado?' — hay más de 10 000 en este periodo: acota las fechas para incluirlos todos':'');
     if(S.informesRaw.length) renderVistaPreviaInforme();
   }catch(e){
     setCloudState(e.isNetwork?'off':'err');
@@ -2160,8 +2445,8 @@ async function buscarInformes() {
 function filaTotalesInforme(campos, regs, sumIds) {
   return campos.map((c,i)=>{
     const suma=sumIds.includes(c.id);
-    if(i===0) return suma?`Total: ${sumarCampo(c,regs).toFixed(2)}`:'Total';
-    return suma?sumarCampo(c,regs).toFixed(2):'';
+    if(i===0) return suma?`Total: ${formatearSuma(c,sumarCampo(c,regs))}`:'Total';
+    return suma?formatearSuma(c,sumarCampo(c,regs)):'';
   });
 }
 async function exportInformeCSV() {
@@ -2173,7 +2458,7 @@ async function exportInformeCSV() {
   const rows=regs.map(r=>campos.map(c=>c.get(r)));
   const sumIds=camposASumar();
   if(sumIds.length) rows.push(filaTotalesInforme(campos,regs,sumIds));
-  const content=[header,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  const content=[header,...rows].map(csvFila).join('\r\n');
   const filename=`informe_${S.informesTipo==='fichajes'?'fichajes':'registros'}_${dateStamp()}.csv`;
   const result=await dlFile(filename,content,'text/csv;charset=utf-8;');
   if(result===null) return;
@@ -2184,14 +2469,14 @@ async function exportInformePDF() {
   if(!regs.length){toast('Busca primero un periodo con registros');return;}
   const campos=camposInformeSeleccionados();
   if(!campos.length){toast('Selecciona al menos un campo para el informe');return;}
-  if(!window.jspdf){toast('⚠ No se pudo cargar la librería de PDF (revisa tu conexión a internet)');return;}
+  if(!window.jspdf){ try{ await cargarLib('pdf'); }catch{ toast('⚠ No se pudo cargar la librería de PDF (revisa tu conexión a internet)'); return; } }
   const header=campos.map(c=>c.label);
   const rows=regs.map(r=>campos.map(c=>c.get(r)));
   const sumIds=camposASumar();
   const foot=sumIds.length?[filaTotalesInforme(campos,regs,sumIds)]:null;
   const sumIdxs=campos.map((c,i)=>sumIds.includes(c.id)?i:-1).filter(i=>i>=0);
   const {jsPDF}=window.jspdf;
-  const doc=new jsPDF({orientation:'landscape',unit:'pt'});
+  const doc=new jsPDF({orientation:'landscape',unit:'pt',compress:true});
   const logo=await cargarLogoInforme('img/mosquito_logo_team.png');
   const titulo=S.informesTipo==='fichajes' ? 'Values Irradiation WEB-210 — Informe de fichajes' : 'Values Irradiation WEB-210 — Informe';
   const {tablaY}=dibujarCabeceraPDF(doc, logo, titulo);
@@ -2301,6 +2586,13 @@ function renderSettings() {
   applyTheme(LS.themePref());
   document.getElementById('sdose').value=S.dose;
   actualizarEstadoNotifUI();
+  document.getElementById('acctNick').textContent=S.user||'—';
+  document.getElementById('acctRol').textContent=S.offline?'sesión sin conexión':(S.isAdmin?'Administrador':'Usuario');
+  const v=document.getElementById('appVersionNote'); if(v) v.textContent=`Values Irradiation WEB-210 · versión ${APP_VERSION}`;
+}
+function cerrarGuiaRapida() {
+  LS.setHelpSeen();
+  const c=document.getElementById('helpCard'); if(c) c.style.display='none';
 }
 function renderUsersScreen() {
   if(!S.isAdmin){ go('menu'); toast('Solo un administrador puede ver esta pantalla'); return; }
@@ -2326,18 +2618,14 @@ async function addUsr() {
   const horarioSalida=document.getElementById('nHorarioSalida').value||'13:57';
   const tipoHorario=document.getElementById('nTipoHorario').value||'fijo';
   if(!nick||!pass){toast('Rellena usuario y contraseña');return;}
+  if(pass.length<8){toast('La contraseña debe tener al menos 8 caracteres');return;}
   try{
     await apiPost('/usuarios',{action:'crear',token:LS.token(),payload:{nick,pass,nombre,apellido1:ap1,apellido2:ap2,role,horarioEntrada,horarioSalida,tipoHorario}});
     setCloudState('ok');
     toast(`✓ Usuario "${nick}" creado`);
   }catch(e){
-    if(!e.isNetwork){ toast('⚠ '+e.message); return; }
-    setCloudState('off');
-    const users=LS.users();
-    if(users.find(u=>u.name.toLowerCase()===nick.toLowerCase())){toast('El usuario ya existe');return;}
-    users.push({name:nick,pass,role,att:0,locked:false,nombre,apellido1:ap1,apellido2:ap2,horarioEntrada,horarioSalida,tipoHorario});
-    LS.setU(users);
-    toast(`✓ Usuario "${nick}" creado (local, sin conexión)`);
+    toast(e.isNetwork?'⚠ Sin conexión: no se ha podido crear el usuario':'⚠ '+e.message);
+    return;
   }
   ['nusr','nnombre','nap1','nap2','npass'].forEach(id=>{document.getElementById(id).value='';});
   document.getElementById('nHorarioEntrada').value='07:00';
@@ -2350,7 +2638,7 @@ let editUserNick = null;
 async function renderUsrs() {
   const box=document.getElementById('usrList');
   const note=document.getElementById('usrSyncNote');
-  let users=[], enNube=true;
+  let users=[];
   try{
     const data=await apiPost('/usuarios',{action:'list',token:LS.token()});
     users=(data.usuarios||[]).map(u=>({
@@ -2361,22 +2649,16 @@ async function renderUsrs() {
       tipoHorario:u.tipo_horario||'fijo'
     }));
     setCloudState('ok');
+    if(note) note.textContent='';
   }catch(e){
-    enNube=false;
     setCloudState(e.isNetwork?'off':'err');
-    users=LS.users().map(u=>({
-      name:u.name, role:u.role, locked:u.locked,
-      nombre:u.nombre||'', apellido1:u.apellido1||'', apellido2:u.apellido2||'',
-      codigo:codigoConductor(u.nombre||u.name,u.apellido1||'',u.apellido2||''),
-      horarioEntrada:u.horarioEntrada||'07:00', horarioSalida:u.horarioSalida||'13:57',
-      tipoHorario:u.tipoHorario||'fijo'
-    }));
+    box.innerHTML='<div class="remp">No se ha podido cargar la lista de usuarios (hace falta conexión con la nube).</div>';
+    return;
   }
-  if(note) note.textContent = enNube ? '' : '⚠ Mostrando usuarios de este dispositivo (sin conexión con la nube).';
   box.innerHTML=users.length===0
     ?'<div style="font-size:13px;color:var(--txt3)">No hay usuarios</div>'
     :users.map(u=>{
-      const nickSeguro=u.name.replace(/'/g,"\\'");
+      const nickSeguro=escJs(u.name);
       if(editUserNick && u.name.toLowerCase()===editUserNick.toLowerCase()){
         return filaUsrEdicion(u, nickSeguro);
       }
@@ -2385,10 +2667,10 @@ async function renderUsrs() {
       const nombreCompleto=[u.nombre,u.apellido1,u.apellido2].filter(Boolean).join(' ');
       return `
       <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--brd);font-size:13px;flex-wrap:wrap">
-        <span style="font-family:var(--fh);font-size:11px;font-weight:700;background:rgba(76,110,245,.18);color:var(--blue-l);padding:2px 6px;border-radius:4px;flex-shrink:0">${u.codigo}</span>
-        <span style="flex:1;font-weight:600">${u.name}${nombreCompleto?` <span style="color:var(--txt3);font-weight:400">— ${nombreCompleto}</span>`:''}</span>
-        <span style="color:var(--txt3);font-size:11px">⏰ ${u.horarioEntrada||'07:00'}–${u.horarioSalida||'13:57'} · ${u.tipoHorario==='flexible'?'flexible':'fija'}</span>
-        <span style="color:var(--txt3)">${u.role}</span>
+        <span style="font-family:var(--fh);font-size:11px;font-weight:700;background:rgba(76,110,245,.18);color:var(--blue-l);padding:2px 6px;border-radius:4px;flex-shrink:0">${esc(u.codigo)}</span>
+        <span style="flex:1;font-weight:600">${esc(u.name)}${nombreCompleto?` <span style="color:var(--txt3);font-weight:400">— ${esc(nombreCompleto)}</span>`:''}</span>
+        <span style="color:var(--txt3);font-size:11px">⏰ ${esc(u.horarioEntrada||'07:00')}–${esc(u.horarioSalida||'13:57')} · ${u.tipoHorario==='flexible'?'flexible':'fija'}</span>
+        <span style="color:var(--txt3)">${esc(u.role)}</span>
         <button class="btn bo bs" style="padding:3px 8px;font-size:11px" onclick="editarUsrInicio('${nickSeguro}')">✏️ Editar</button>
         ${u.locked
           ?`<span style="color:var(--red-l);font-size:11px">Bloqueado</span>
@@ -2402,10 +2684,9 @@ async function renderUsrs() {
 function filaUsrEdicion(u, nickSeguro) {
   const esAdmin=u.name.toLowerCase()==='admin';
   const puedeEditarRol=!esAdmin||(S.user||'').toLowerCase()==='admin';
-  const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
   return `
   <div style="padding:10px;margin-top:8px;border:1px solid var(--brd3);border-radius:10px;background:rgba(76,110,245,.06);display:flex;flex-direction:column;gap:10px">
-    <div style="font-weight:700;font-family:var(--fh)">Editando: ${u.name}</div>
+    <div style="font-weight:700;font-family:var(--fh)">Editando: ${esc(u.name)}</div>
     <div class="fr2">
       <div class="fl"><label>Nombre</label><input type="text" id="eu_nombre" value="${esc(u.nombre)}"></div>
       <div class="fl"><label>1er apellido</label><input type="text" id="eu_ap1" value="${esc(u.apellido1)}"></div>
@@ -2445,23 +2726,14 @@ async function editarUsrGuardar(nick) {
   const horarioEntrada=document.getElementById('eu_horarioEntrada').value;
   const horarioSalida=document.getElementById('eu_horarioSalida').value;
   const tipoHorario=document.getElementById('eu_tipoHorario').value;
+  if(nuevaPass && nuevaPass.length<8){ toast('La contraseña nueva debe tener al menos 8 caracteres'); return; }
   try{
     await apiPost('/usuarios',{action:'editar',token:LS.token(),payload:{nick,nombre,apellido1:ap1,apellido2:ap2,role,nuevaPass:nuevaPass||undefined,horarioEntrada,horarioSalida,tipoHorario}});
     setCloudState('ok');
     toast('✓ Usuario actualizado');
   }catch(e){
-    if(!e.isNetwork){ toast('⚠ '+e.message); return; }
-    setCloudState('off');
-    const users=LS.users();
-    const u=users.find(u=>u.name.toLowerCase()===nick.toLowerCase());
-    if(u){
-      u.nombre=nombre; u.apellido1=ap1; u.apellido2=ap2;
-      if(role!==undefined) u.role=role;
-      if(nuevaPass) u.pass=nuevaPass;
-      u.horarioEntrada=horarioEntrada; u.horarioSalida=horarioSalida; u.tipoHorario=tipoHorario;
-      LS.setU(users);
-      toast('✓ Usuario actualizado (local, sin conexión)');
-    }
+    toast(e.isNetwork?'⚠ Sin conexión: no se han podido guardar los cambios':'⚠ '+e.message);
+    return;
   }
   editUserNick=null;
   renderUsrs();
@@ -2479,11 +2751,7 @@ async function delUsr(nick) {
     setCloudState('ok');
     toast('Usuario eliminado');
   }catch(e){
-    if(!e.isNetwork){ toast('⚠ '+e.message); renderUsrs(); return; }
-    setCloudState('off');
-    const users=LS.users();
-    const idx=users.findIndex(u=>u.name.toLowerCase()===nick.toLowerCase());
-    if(idx>=0){ users.splice(idx,1); LS.setU(users); toast('Usuario eliminado (local, sin conexión)'); }
+    toast(e.isNetwork?'⚠ Sin conexión: no se ha podido eliminar':'⚠ '+e.message);
   }
   renderUsrs();
   refreshDrivers().then(()=>populateConductorSelect());
@@ -2494,11 +2762,7 @@ async function unlock(nick) {
     setCloudState('ok');
     toast('✓ Usuario desbloqueado');
   }catch(e){
-    if(!e.isNetwork){ toast('⚠ '+e.message); renderUsrs(); return; }
-    setCloudState('off');
-    const users=LS.users();
-    const u=users.find(u=>u.name.toLowerCase()===nick.toLowerCase());
-    if(u){ u.locked=false; u.att=0; LS.setU(users); toast('✓ Usuario desbloqueado (local, sin conexión)'); }
+    toast(e.isNetwork?'⚠ Sin conexión: no se ha podido desbloquear':'⚠ '+e.message);
   }
   renderUsrs();
 }
@@ -2527,15 +2791,14 @@ async function renderIrradiadoresScreen() {
       const nombreCompleto=[u.nombre,u.apellido1,u.apellido2].filter(Boolean).join(' ');
       return `
       <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--brd);font-size:13px;flex-wrap:wrap">
-        <span style="font-family:var(--fmono);font-size:11px;font-weight:700;background:rgba(76,110,245,.18);color:var(--blue-l);padding:2px 6px;border-radius:4px;flex-shrink:0">${u.codigo||'—'}</span>
-        <span style="flex:1;font-weight:600">${nombreCompleto}${u.activo===false?' <span style="color:var(--txt3);font-weight:400">(inactivo)</span>':''}</span>
-        <button class="btn bo bs" style="padding:3px 8px;font-size:11px" onclick="editarIrrInicio('${u.id}')">✏️ Editar</button>
-        <button class="btn br bs" style="padding:3px 8px;font-size:11px" onclick="delIrradiador('${u.id}')">Eliminar</button>
+        <span style="font-family:var(--fmono);font-size:11px;font-weight:700;background:rgba(76,110,245,.18);color:var(--blue-l);padding:2px 6px;border-radius:4px;flex-shrink:0">${esc(u.codigo||'—')}</span>
+        <span style="flex:1;font-weight:600">${esc(nombreCompleto)}${u.activo===false?' <span style="color:var(--txt3);font-weight:400">(inactivo)</span>':''}</span>
+        <button class="btn bo bs" style="padding:3px 8px;font-size:11px" onclick="editarIrrInicio('${escJs(u.id)}')">✏️ Editar</button>
+        <button class="btn br bs" style="padding:3px 8px;font-size:11px" onclick="delIrradiador('${escJs(u.id)}')">Eliminar</button>
       </div>`;
     }).join('');
 }
 function filaIrrEdicion(u) {
-  const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
   return `
   <div style="padding:10px;margin-top:8px;border:1px solid var(--brd3);border-radius:10px;background:rgba(76,110,245,.06);display:flex;flex-direction:column;gap:10px">
     <div style="font-weight:700;font-family:var(--fh)">Editando irradiador</div>
@@ -2549,7 +2812,7 @@ function filaIrrEdicion(u) {
       Activo (aparece en el desplegable del formulario)
     </label>
     <div style="display:flex;gap:8px">
-      <button class="btn bp bs" style="flex:1" onclick="editarIrrGuardar('${u.id}')">Guardar cambios</button>
+      <button class="btn bp bs" style="flex:1" onclick="editarIrrGuardar('${escJs(u.id)}')">Guardar cambios</button>
       <button class="btn bo bs" onclick="editarIrrCancelar()">Cancelar</button>
     </div>
   </div>`;
@@ -2626,15 +2889,14 @@ async function renderVehiculosScreen() {
       if(editVehId===v.id) return filaVehEdicion(v);
       return `
       <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--brd);font-size:13px;flex-wrap:wrap">
-        <span style="font-family:var(--fmono);font-size:11px;font-weight:700;background:rgba(76,110,245,.18);color:var(--blue-l);padding:2px 6px;border-radius:4px;flex-shrink:0">${v.matricula}</span>
-        <span style="flex:1;font-weight:600">Obra: ${v.numero_obra||'—'}${v.activo===false?' <span style="color:var(--txt3);font-weight:400">(inactivo)</span>':''}</span>
-        <button class="btn bo bs" style="padding:3px 8px;font-size:11px" onclick="editarVehInicio('${v.id}')">✏️ Editar</button>
-        <button class="btn br bs" style="padding:3px 8px;font-size:11px" onclick="delVehiculo('${v.id}')">Eliminar</button>
+        <span style="font-family:var(--fmono);font-size:11px;font-weight:700;background:rgba(76,110,245,.18);color:var(--blue-l);padding:2px 6px;border-radius:4px;flex-shrink:0">${esc(v.matricula)}</span>
+        <span style="flex:1;font-weight:600">Obra: ${esc(v.numero_obra||'—')}${v.activo===false?' <span style="color:var(--txt3);font-weight:400">(inactivo)</span>':''}</span>
+        <button class="btn bo bs" style="padding:3px 8px;font-size:11px" onclick="editarVehInicio('${escJs(v.id)}')">✏️ Editar</button>
+        <button class="btn br bs" style="padding:3px 8px;font-size:11px" onclick="delVehiculo('${escJs(v.id)}')">Eliminar</button>
       </div>`;
     }).join('');
 }
 function filaVehEdicion(v) {
-  const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
   return `
   <div style="padding:10px;margin-top:8px;border:1px solid var(--brd3);border-radius:10px;background:rgba(76,110,245,.06);display:flex;flex-direction:column;gap:10px">
     <div style="font-weight:700;font-family:var(--fh)">Editando vehículo</div>
@@ -2645,7 +2907,7 @@ function filaVehEdicion(v) {
       Activo (aparece en el desplegable de Conducción)
     </label>
     <div style="display:flex;gap:8px">
-      <button class="btn bp bs" style="flex:1" onclick="editarVehGuardar('${v.id}')">Guardar cambios</button>
+      <button class="btn bp bs" style="flex:1" onclick="editarVehGuardar('${escJs(v.id)}')">Guardar cambios</button>
       <button class="btn bo bs" onclick="editarVehCancelar()">Cancelar</button>
     </div>
   </div>`;
@@ -2720,14 +2982,13 @@ async function renderEstacionesScreen() {
       if(editEstId===x.id) return filaEstEdicion(x);
       return `
       <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--brd);font-size:13px;flex-wrap:wrap">
-        <span style="flex:1;font-weight:600">${x.nombre}${x.activo===false?' <span style="color:var(--txt3);font-weight:400">(inactiva)</span>':''}</span>
-        <button class="btn bo bs" style="padding:3px 8px;font-size:11px" onclick="editarEstInicio('${x.id}')">✏️ Editar</button>
-        <button class="btn br bs" style="padding:3px 8px;font-size:11px" onclick="delEstacion('${x.id}')">Eliminar</button>
+        <span style="flex:1;font-weight:600">${esc(x.nombre)}${x.activo===false?' <span style="color:var(--txt3);font-weight:400">(inactiva)</span>':''}</span>
+        <button class="btn bo bs" style="padding:3px 8px;font-size:11px" onclick="editarEstInicio('${escJs(x.id)}')">✏️ Editar</button>
+        <button class="btn br bs" style="padding:3px 8px;font-size:11px" onclick="delEstacion('${escJs(x.id)}')">Eliminar</button>
       </div>`;
     }).join('');
 }
 function filaEstEdicion(x) {
-  const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
   return `
   <div style="padding:10px;margin-top:8px;border:1px solid var(--brd3);border-radius:10px;background:rgba(76,110,245,.06);display:flex;flex-direction:column;gap:10px">
     <div style="font-weight:700;font-family:var(--fh)">Editando estación</div>
@@ -2737,7 +2998,7 @@ function filaEstEdicion(x) {
       Activa (aparece en el desplegable de Conducción)
     </label>
     <div style="display:flex;gap:8px">
-      <button class="btn bp bs" style="flex:1" onclick="editarEstGuardar('${x.id}')">Guardar cambios</button>
+      <button class="btn bp bs" style="flex:1" onclick="editarEstGuardar('${escJs(x.id)}')">Guardar cambios</button>
       <button class="btn bo bs" onclick="editarEstCancelar()">Cancelar</button>
     </div>
   </div>`;
@@ -2821,6 +3082,8 @@ async function guardarViaje() {
     kmInicial: document.getElementById('vKmIni').value,
     kmFinal: document.getElementById('vKmFin').value,
   };
+  const kmI=parseFloat(payload.kmInicial), kmF=parseFloat(payload.kmFinal);
+  if(!isNaN(kmI)&&!isNaN(kmF)&&kmF<kmI){ toast('⚠ El km final no puede ser menor que el km inicial'); document.getElementById('vKmFin').focus(); return; }
   setBtnLoading('vGuardarBtn', true, 'Guardando…');
   try{
     await apiPost('/conduccion',{action:'guardarViaje',token:LS.token(),payload});
@@ -2848,13 +3111,13 @@ async function renderViajesList() {
     box.innerHTML=viajes.slice(0,30).map(v=>{
       const puede=S.isAdmin||v.creado_por===S.user;
       return `<div class="ritem">
-        <div class="rdate">🚗 ${v.matricula}${v.vehiculos&&v.vehiculos.numero_obra?' · Obra '+v.vehiculos.numero_obra:''} ${v.fecha?'— '+fmt(pd(v.fecha)):''} <span style="color:var(--txt3);font-weight:400">· ${v.creado_por||'—'}</span></div>
+        <div class="rdate">🚗 ${esc(v.matricula)}${v.vehiculos&&v.vehiculos.numero_obra?' · Obra '+esc(v.vehiculos.numero_obra):''} ${v.fecha?'— '+esc(fmt(pd(v.fecha))):''} <span style="color:var(--txt3);font-weight:400">· ${esc(v.creado_por||'—')}</span></div>
         <div class="rdets">
-          <span>Km inicial: <strong>${v.km_inicial??'—'}</strong></span>
-          <span>Km final: <strong>${v.km_final??'—'}</strong></span>
-          <span>Recorridos: <strong>${v.km_recorridos??'—'} km</strong></span>
+          <span>Km inicial: <strong>${esc(v.km_inicial??'—')}</strong></span>
+          <span>Km final: <strong>${esc(v.km_final??'—')}</strong></span>
+          <span>Recorridos: <strong>${esc(v.km_recorridos??'—')} km</strong></span>
         </div>
-        ${puede?`<div style="margin-top:8px;text-align:right"><button class="btn br bs" style="padding:3px 10px;font-size:11px" onclick="eliminarViaje('${v.id}')">🗑 Eliminar</button></div>`:''}
+        ${puede?`<div style="margin-top:8px;text-align:right"><button class="btn br bs" style="padding:3px 10px;font-size:11px" onclick="eliminarViaje('${escJs(v.id)}')">🗑 Eliminar</button></div>`:''}
       </div>`;
     }).join('<div style="height:8px"></div>');
   }catch(e){
@@ -2920,15 +3183,15 @@ async function renderRepostajesList() {
     box.innerHTML=rep.slice(0,30).map(r=>{
       const puede=S.isAdmin||r.creado_por===S.user;
       return `<div class="ritem">
-        <div class="rdate">⛽ ${r.matricula}${r.vehiculos&&r.vehiculos.numero_obra?' · Obra '+r.vehiculos.numero_obra:''} ${r.fecha?'— '+fmt(pd(r.fecha)):''} <span style="color:var(--txt3);font-weight:400">· ${FUEL_LABELS[r.tipo_combustible]||'—'}</span></div>
+        <div class="rdate">⛽ ${esc(r.matricula)}${r.vehiculos&&r.vehiculos.numero_obra?' · Obra '+esc(r.vehiculos.numero_obra):''} ${r.fecha?'— '+esc(fmt(pd(r.fecha))):''} <span style="color:var(--txt3);font-weight:400">· ${esc(FUEL_LABELS[r.tipo_combustible]||'—')}</span></div>
         <div class="rdets">
-          <span>Km: <strong>${r.km??'—'}</strong></span>
-          <span>Importe: <strong>${r.importe??'—'} €</strong></span>
-          <span>€/L: <strong>${r.precio_litro??'—'}</strong></span>
-          <span>Litros: <strong>${r.litros??'—'} L</strong></span>
-          <span>Estación: <strong>${r.estacion_servicio||'—'}</strong></span>
+          <span>Km: <strong>${esc(r.km??'—')}</strong></span>
+          <span>Importe: <strong>${esc(r.importe??'—')} €</strong></span>
+          <span>€/L: <strong>${esc(r.precio_litro??'—')}</strong></span>
+          <span>Litros: <strong>${esc(r.litros??'—')} L</strong></span>
+          <span>Estación: <strong>${esc(r.estacion_servicio||'—')}</strong></span>
         </div>
-        ${puede?`<div style="margin-top:8px;text-align:right"><button class="btn br bs" style="padding:3px 10px;font-size:11px" onclick="eliminarRepostaje('${r.id}')">🗑 Eliminar</button></div>`:''}
+        ${puede?`<div style="margin-top:8px;text-align:right"><button class="btn br bs" style="padding:3px 10px;font-size:11px" onclick="eliminarRepostaje('${escJs(r.id)}')">🗑 Eliminar</button></div>`:''}
       </div>`;
     }).join('<div style="height:8px"></div>');
   }catch(e){
@@ -2993,14 +3256,14 @@ function renderFichajeHoy(data) {
   }else if(!f.hora_salida){
     cont.innerHTML=`
       <div style="text-align:center;padding:6px 0 2px">
-        <div style="font-size:14px;color:var(--txt2);margin-bottom:4px">Entrada: <strong>${f.hora_entrada}</strong></div>
+        <div style="font-size:14px;color:var(--txt2);margin-bottom:4px">Entrada: <strong>${esc(f.hora_entrada)}</strong></div>
         <div style="font-size:12px;color:var(--txt3);margin-bottom:14px">Todavía no has fichado la salida</div>
         <button class="btn bp bw" onclick="ficharSalida()">🔴 Fichar salida</button>
       </div>`;
   }else{
     cont.innerHTML=`
       <div style="text-align:center;padding:6px 0 2px">
-        <div style="font-size:14px;color:var(--txt2)">Entrada: <strong>${f.hora_entrada}</strong> · Salida: <strong>${f.hora_salida}</strong></div>
+        <div style="font-size:14px;color:var(--txt2)">Entrada: <strong>${esc(f.hora_entrada)}</strong> · Salida: <strong>${esc(f.hora_salida)}</strong></div>
         <div style="font-size:13px;color:var(--txt3);margin-top:4px">Horas de más hoy: <strong style="color:${colorHorasDeMas(f.horas_de_mas)}">${formatHorasHM(f.horas_de_mas)}</strong></div>
         <div class="lft" style="margin-top:10px">Ya has fichado hoy. Vuelve mañana.</div>
       </div>`;
@@ -3022,30 +3285,27 @@ async function cargarFichajeHoy() {
     cont.innerHTML='<div class="lft">No se ha podido consultar el fichaje de hoy (sin conexión o error del servidor).</div>';
   }
 }
-async function ficharEntrada() {
+// Un doble toque (o un móvil lento) enviaba dos peticiones y la segunda daba un error confuso: ahora se bloquea el botón mientras se ficha.
+let _fichando=false;
+async function ficharAccion(accion, textoOk) {
+  if(_fichando) return;
   if(!LS.token()){ toast('Necesitas conexión a internet para fichar'); return; }
+  _fichando=true;
+  document.querySelectorAll('#fichajeEstadoContenido button').forEach(b=>{ b.disabled=true; });
   try{
-    await apiPost('/fichajes',{action:'ficharEntrada',token:LS.token()});
+    await apiPost('/fichajes',{action:accion,token:LS.token()});
     setCloudState('ok');
-    toast('✓ Entrada fichada');
-    await cargarFichajeHoy();
-    cargarResumenMesFichaje();
+    toast(textoOk);
   }catch(e){
     toast(e.isNetwork?'⚠ Sin conexión: no se ha podido fichar':'⚠ '+e.message);
+  }finally{
+    _fichando=false;
   }
+  await cargarFichajeHoy();
+  cargarResumenMesFichaje();
 }
-async function ficharSalida() {
-  if(!LS.token()){ toast('Necesitas conexión a internet para fichar'); return; }
-  try{
-    await apiPost('/fichajes',{action:'ficharSalida',token:LS.token()});
-    setCloudState('ok');
-    toast('✓ Salida fichada');
-    await cargarFichajeHoy();
-    cargarResumenMesFichaje();
-  }catch(e){
-    toast(e.isNetwork?'⚠ Sin conexión: no se ha podido fichar':'⚠ '+e.message);
-  }
-}
+function ficharEntrada() { return ficharAccion('ficharEntrada','✓ Entrada fichada'); }
+function ficharSalida()  { return ficharAccion('ficharSalida','✓ Salida fichada'); }
 function renderFichajeHistorial(fichajes) {
   const box=document.getElementById('fichajeHistorial');
   if(!box) return;
@@ -3056,7 +3316,7 @@ function renderFichajeHistorial(fichajes) {
       return `
       <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--brd);font-size:13px;flex-wrap:wrap">
         <span style="flex:1;font-weight:600">${f.fecha?fmt(pd(f.fecha)):'—'}</span>
-        <span style="color:var(--txt2)">${f.hora_entrada||'—'} → ${f.hora_salida||'—'}</span>
+        <span style="color:var(--txt2)">${esc(f.hora_entrada||'—')} → ${esc(f.hora_salida||'—')}</span>
         <span style="font-weight:700;color:${colorHorasDeMas(horas)}">${!isNaN(horas)?formatHorasHM(horas):'—'}</span>
       </div>`;
     }).join('');
@@ -3175,6 +3435,20 @@ async function confirmLogout() {
   if(ok) logout();
 }
 
+document.addEventListener('keydown', e=>{
+  if(e.key!=='Escape') return;
+  const abierto=id=>{ const el=document.getElementById(id); return !!el && el.classList.contains('on'); };
+  if(abierto('confirmOv')) _confirmClose(false);
+  else if(abierto('passOv')) cerrarCambioPass();
+  else if(abierto('urnaModal')) closeUrna();
+  else if(abierto('detOv')) cerrarDetalleRegistro();
+  else if(abierto('camposOv')) cerrarSelectorCampos();
+  else if(abierto('exov')) closeExDlg();
+  else if(abierto('scov')) closeScDlg();
+  else if(abierto('rdiag')) closeR();
+  else if(abierto('drawer')) closeDrawer();
+});
+
 function toast(msg) {
   const t=document.getElementById('toast');
   t.textContent=msg; t.classList.add('on');
@@ -3183,8 +3457,6 @@ function toast(msg) {
 
 // ── BOOT ──────────────────────────────────────────────
 boot();
-setLogo(0);
-startLogoRotation();
 
 
 // ── THEME (diurno / nocturno) ────────────────────────

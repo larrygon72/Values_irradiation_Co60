@@ -1,8 +1,12 @@
 {
   "name": "values-irradiation-web210",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
+  "scripts": {
+    "test": "node --import ./tests/helpers/register.mjs --test tests/api.test.mjs",
+    "check": "node --check js/app.js && node --check sw.js && for f in api/*.js api/_lib/*.js; do node --check \"$f\" || exit 1; done"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
     "bcryptjs": "^2.4.3",
