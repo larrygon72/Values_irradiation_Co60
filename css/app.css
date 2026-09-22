@@ -203,7 +203,9 @@ button{cursor:pointer;border:none;background:none}
 .fl input[type=date],.fl input[type=time]{cursor:pointer}
 .fl input[type=date]::-webkit-calendar-picker-indicator,
 .fl input[type=time]::-webkit-calendar-picker-indicator{filter:invert(.55);cursor:pointer}
-.fr2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.fr2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px} /* minmax(0,…): los campos de fecha ya no se salen de la tarjeta en móviles estrechos */
+.fr2>.fl,.fr2>div{min-width:0}
+.fl input[type=date],.fl input[type=time]{min-width:0;max-width:100%}
 @media(min-width:600px){.fr2{gap:16px}}
 body.theme-light .fl input[type=date]::-webkit-calendar-picker-indicator,
 body.theme-light .fl input[type=time]::-webkit-calendar-picker-indicator{filter:invert(.35)}

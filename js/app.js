@@ -89,7 +89,7 @@ const S = {
   md:[0,0,0,0,0,0],
   exCtx:'form',
   histVista:'lista', histRaw:[], histFiltered:[],
-  informesRaw:[], informesTipo:'registros',
+  informesRaw:[], informesTipo:'registros', informesTodo:[], informesBuscado:false, informesPeriodo:null,
   histSort:{campo:'fecha_irradiacion',dir:'desc'},
   editingId:null, detRegistro:null,
   dashRegs:[],
@@ -658,9 +658,10 @@ function go(id) {
     const iso=tod;
     document.getElementById('iDesde').value=iso(hace30);
     document.getElementById('iHasta').value=iso(hoy);
-    S.informesRaw=[];
+    S.informesRaw=[]; S.informesTodo=[]; S.informesBuscado=false; S.informesPeriodo=null;
     document.getElementById('informesNote').textContent='';
     ocultarVistaPreviaInforme();
+    iniciarFiltrosInforme();
   }
   if(id==='form')       { populateConductorSelect(); refreshDrivers().then(populateConductorSelect); populateIrradiadorSelect(); refreshIrradiadores().then(populateIrradiadorSelect); renderUrnaCards(); updateStepperStatus(); }
   if(id==='irradiadores') renderIrradiadoresScreen();
@@ -700,7 +701,7 @@ function nuevoRegistro() {
 function logout() {
   LS.setToken(''); LS.setSession(null);
   S.user=null; S.isAdmin=false; S.offline=false;
-  S.dashCache=null; S.dashRegs=[]; S.histRaw=[]; S.histFiltered=[]; S.informesRaw=[]; S.detRegistro=null; S.editingId=null;
+  S.dashCache=null; S.dashRegs=[]; S.histRaw=[]; S.histFiltered=[]; S.informesRaw=[]; S.informesTodo=[]; S.informesBuscado=false; S.detRegistro=null; S.editingId=null;
   stopNotifPolling();
   cerrarTodosLosDialogos();
   // Antes el usuario y la contraseña seguían escritos en el login tras cerrar sesión: el siguiente en usar el equipo entraba con un clic.
@@ -2201,7 +2202,7 @@ function cargarLogoInforme(ruta) {
 // logo es siempre el mismo (misma proporción 3:2), para que el resto del
 // informe no salte de sitio según haya o no haya conexión. Devuelve dónde
 // puede empezar el contenido (tablaY) para que nada se solape.
-function dibujarCabeceraPDF(doc, logo, titulo) {
+function dibujarCabeceraPDF(doc, logo, titulo, detalle) {
   const logoX=40, logoY=14, logoW=64;
   const logoH = logo ? logoW*(logo.h/logo.w) : logoW*(2/3);
   if (logo) doc.addImage(logo.dataURL,'PNG',logoX,logoY,logoW,logoH);
@@ -2212,6 +2213,7 @@ function dibujarCabeceraPDF(doc, logo, titulo) {
   const tablaY=Math.max(55, logoY+logoH+22);
   doc.setFontSize(14); doc.text(titulo,textX,32);
   doc.setFontSize(9);  doc.text(`Generado: ${new Date().toLocaleString()}`,textX,47);
+  if(detalle){ doc.text(detalle,textX,61); }   // p. ej. «Periodo: 01/09/2026 – 20/09/2026 · Usuario: ana»
   return {textX, tablaY};
 }
 async function exportHistPDF() {
@@ -2296,10 +2298,120 @@ function camposInformeCatalogo() {
 }
 function cambiarTipoInforme() {
   S.informesTipo=document.getElementById('informeTipo').value;
-  S.informesRaw=[];
+  S.informesRaw=[]; S.informesTodo=[]; S.informesBuscado=false; S.informesPeriodo=null;
   document.getElementById('informesNote').textContent='';
   ocultarVistaPreviaInforme();
   renderCamposInforme();
+  iniciarFiltrosInforme();
+}
+
+// ── Filtros de Informes ───────────────────────────────
+// Registros: Conductor, Guardado por (usuario) e Irradiador — se aplican sobre lo descargado (igual que en el Historial).
+// Fichajes:  Usuario — lo aplica el servidor (un administrador puede elegir cualquiera; los demás solo ven los suyos).
+// Los totales Σ, la vista previa y las exportaciones (CSV/PDF) usan siempre solo lo filtrado.
+const nombreCompletoDe = (u) => [u.nombre,u.apellido1,u.apellido2].filter(Boolean).join(' ');
+function valoresFiltrosInforme() {
+  const v=id=>{ const e=document.getElementById(id); return e?e.value:''; };
+  return { conductor:v('iConductor'), usuario:v('iUsuario'), irradiador:v('iIrradiador'), usuarioFich:v('iUsuarioFich') };
+}
+function textoSeleccionado(id) {
+  const e=document.getElementById(id);
+  return (e&&e.value&&e.selectedOptions[0])?e.selectedOptions[0].textContent:'';
+}
+function descripcionFiltrosInforme() {
+  const partes=[];
+  if(S.informesTipo==='fichajes'){
+    const u=textoSeleccionado('iUsuarioFich'); if(u) partes.push('Usuario: '+u.split(' — ')[0]);
+  } else {
+    const c=textoSeleccionado('iConductor'), u=textoSeleccionado('iUsuario'), i=textoSeleccionado('iIrradiador');
+    if(c) partes.push('Conductor: '+c); if(u) partes.push('Guardado por: '+u.split(' — ')[0]); if(i) partes.push('Irradiador: '+i);
+  }
+  return partes.join(' · ');
+}
+// Rellena los desplegables con el catálogo (usuarios, irradiadores) más lo que aparezca en los datos descargados.
+function poblarFiltrosInforme(items) {
+  items=items||[];
+  const es=(a,b)=>a[1].localeCompare(b[1],'es');
+  const set=(id,pares,todos)=>{
+    const el=document.getElementById(id); if(!el) return;
+    const actual=el.value;
+    el.innerHTML=`<option value="">${esc(todos)}</option>`+pares.map(([v,t])=>`<option value="${esc(v)}">${esc(t)}</option>`).join('');
+    if(pares.some(([v])=>v===actual)) el.value=actual;
+  };
+  const usuarios=LS.driverCache();
+  if(S.informesTipo==='fichajes'){
+    if(!S.isAdmin){
+      // Un usuario normal solo puede ver sus propios fichajes.
+      const el=document.getElementById('iUsuarioFich');
+      if(el){ el.innerHTML=`<option value="${esc(S.user||'')}">${esc(S.user||'')}</option>`; el.value=S.user||''; el.disabled=true; }
+    } else {
+      const m=new Map(usuarios.map(u=>{ const n=nombreCompletoDe(u); return [u.nick, n&&n!==u.nick?`${u.nick} — ${n}`:u.nick]; }));
+      items.forEach(f=>{ if(f.usuario_nick&&!m.has(f.usuario_nick)) m.set(f.usuario_nick,f.usuario_nick); });
+      const el=document.getElementById('iUsuarioFich'); if(el) el.disabled=false;
+      set('iUsuarioFich',[...m.entries()].sort(es),'Todos los usuarios');
+    }
+    return;
+  }
+  const cond=new Map(usuarios.map(u=>[u.nick,nombreCompletoDe(u)||u.nick]));
+  items.forEach(r=>{ if(r.conductor_nick&&!cond.has(r.conductor_nick)) cond.set(r.conductor_nick,r.conductor_nombre||r.conductor_nick); });
+  const guard=new Map(usuarios.map(u=>[u.nick, (nombreCompletoDe(u)&&nombreCompletoDe(u)!==u.nick)?`${u.nick} — ${nombreCompletoDe(u)}`:u.nick]));
+  items.forEach(r=>{ if(r.creado_por&&!guard.has(r.creado_por)) guard.set(r.creado_por,r.creado_por); });
+  const irr=new Set(LS.irradiadorCache().map(nombreCompletoDe).filter(Boolean));
+  items.forEach(r=>{ const n=r.irradiador_nombre||r.irradiador; if(n) irr.add(n); });
+  set('iConductor',[...cond.entries()].sort(es),'Todos');
+  set('iUsuario',[...guard.entries()].sort(es),'Todos');
+  set('iIrradiador',[...irr].sort((a,b)=>a.localeCompare(b,'es')).map(n=>[n,n]),'Todos');
+}
+function mostrarFiltrosSegunTipo() {
+  const fich=S.informesTipo==='fichajes';
+  const a=document.getElementById('iFiltrosRegistros'), b=document.getElementById('iFiltrosFichajes');
+  if(a) a.style.display=fich?'none':'flex';
+  if(b) b.style.display=fich?'flex':'none';
+  const hint=document.getElementById('informeFiltrosHint');
+  if(hint) hint.textContent=fich
+    ? (S.isAdmin?'Elige un usuario para ver solo sus fichajes; si lo dejas en «Todos los usuarios» el total suma a todos.':'Aquí solo aparecen tus propios fichajes.')
+    : 'Elige un conductor, un usuario o un irradiador para ver solo sus registros; los totales Σ se calculan solo con lo filtrado.';
+}
+function iniciarFiltrosInforme() {
+  ['iConductor','iUsuario','iIrradiador','iUsuarioFich'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
+  mostrarFiltrosSegunTipo();
+  poblarFiltrosInforme([]);
+  // Catálogos actualizados (si hay conexión) para que aparezcan también usuarios/irradiadores nuevos
+  refreshDrivers().then(()=>poblarFiltrosInforme(S.informesTodo));
+  if(S.informesTipo!=='fichajes') refreshIrradiadores().then(()=>poblarFiltrosInforme(S.informesTodo));
+}
+function filtrarRegistrosInforme(items) {
+  const f=valoresFiltrosInforme();
+  const igual=(a,b)=>String(a||'').toLowerCase()===String(b||'').toLowerCase();
+  let regs=items||[];
+  if(f.conductor)  regs=regs.filter(r=>igual(r.conductor_nick,f.conductor));
+  if(f.usuario)    regs=regs.filter(r=>igual(r.creado_por,f.usuario));
+  if(f.irradiador) regs=regs.filter(r=>(r.irradiador_nombre||r.irradiador)===f.irradiador);
+  return regs;
+}
+function actualizarResultadoInforme() {
+  const note=document.getElementById('informesNote');
+  const n=S.informesRaw.length, f=descripcionFiltrosInforme();
+  note.textContent=`${n} registro(s) encontrado(s)`+(f?` — ${f}`:'')+(S.informesTruncado?' — hay más de 10 000 en este periodo: acota las fechas para incluirlos todos':'');
+  if(n) renderVistaPreviaInforme(); else ocultarVistaPreviaInforme();
+}
+function aplicarFiltrosInforme() {
+  if(!S.informesBuscado) return;                       // se aplicará al pulsar Buscar
+  if(S.informesTipo==='fichajes') { buscarInformes(); return; }   // el filtro de usuario lo aplica el servidor
+  S.informesRaw=filtrarRegistrosInforme(S.informesTodo);
+  actualizarResultadoInforme();
+}
+function limpiarFiltrosInforme() {
+  ['iConductor','iUsuario','iIrradiador'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
+  const u=document.getElementById('iUsuarioFich'); if(u&&!u.disabled) u.value='';
+  aplicarFiltrosInforme();
+}
+// Nombre del archivo exportado: incluye el filtro elegido (p. ej. informe_fichajes_ana_20260920.pdf)
+function nombreArchivoInforme(ext) {
+  const f=valoresFiltrosInforme();
+  const partes=S.informesTipo==='fichajes'?[f.usuarioFich]:[f.conductor,f.usuario,f.irradiador];
+  const slug=partes.filter(Boolean).map(x=>String(x).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')).filter(Boolean).join('_').slice(0,50);
+  return `informe_${S.informesTipo==='fichajes'?'fichajes':'registros'}${slug?'_'+slug:''}_${dateStamp()}.${ext}`;
 }
 function renderCamposInforme() {
   const box=document.getElementById('camposInformeBox');
@@ -2425,16 +2537,18 @@ async function buscarInformes() {
   try{
     let items;
     if(S.informesTipo==='fichajes'){
-      const data=await apiPost('/fichajes',{action:'listar',token:LS.token(),payload:{desde,hasta}});
+      const usuarioNick=valoresFiltrosInforme().usuarioFich||undefined;
+      const data=await apiPost('/fichajes',{action:'listar',token:LS.token(),payload:{desde,hasta,usuarioNick}});
       items=data.fichajes||[]; S.informesTruncado=!!data.truncado;
     }else{
       const data=await apiPost('/registros',{action:'listar',token:LS.token(),payload:{desde,hasta}});
       items=data.registros||[]; S.informesTruncado=!!data.truncado;
     }
     setCloudState('ok');
-    S.informesRaw=items;
-    note.textContent=`${S.informesRaw.length} registro(s) encontrado(s)`+(S.informesTruncado?' — hay más de 10 000 en este periodo: acota las fechas para incluirlos todos':'');
-    if(S.informesRaw.length) renderVistaPreviaInforme();
+    S.informesTodo=items; S.informesBuscado=true; S.informesPeriodo={desde,hasta};
+    poblarFiltrosInforme(items);
+    S.informesRaw=S.informesTipo==='fichajes'?items:filtrarRegistrosInforme(items);
+    actualizarResultadoInforme();
   }catch(e){
     setCloudState(e.isNetwork?'off':'err');
     note.textContent='No se ha podido consultar (sin conexión o error del servidor).';
@@ -2459,7 +2573,7 @@ async function exportInformeCSV() {
   const sumIds=camposASumar();
   if(sumIds.length) rows.push(filaTotalesInforme(campos,regs,sumIds));
   const content=[header,...rows].map(csvFila).join('\r\n');
-  const filename=`informe_${S.informesTipo==='fichajes'?'fichajes':'registros'}_${dateStamp()}.csv`;
+  const filename=nombreArchivoInforme('csv');
   const result=await dlFile(filename,content,'text/csv;charset=utf-8;');
   if(result===null) return;
   showSaveDlg(filename,'csv',new Blob(['\uFEFF'+content]).size,'informes',result);
@@ -2479,7 +2593,10 @@ async function exportInformePDF() {
   const doc=new jsPDF({orientation:'landscape',unit:'pt',compress:true});
   const logo=await cargarLogoInforme('img/mosquito_logo_team.png');
   const titulo=S.informesTipo==='fichajes' ? 'Values Irradiation WEB-210 — Informe de fichajes' : 'Values Irradiation WEB-210 — Informe';
-  const {tablaY}=dibujarCabeceraPDF(doc, logo, titulo);
+  const per=S.informesPeriodo;
+  const periodo=(per&&(per.desde||per.hasta))?`Periodo: ${per.desde?fmt(pd(per.desde)):'…'} – ${per.hasta?fmt(pd(per.hasta)):'…'}`:'';
+  const detalle=[periodo,descripcionFiltrosInforme()].filter(Boolean).join('   ·   ');
+  const {tablaY}=dibujarCabeceraPDF(doc, logo, titulo, detalle);
   doc.autoTable({
     head:[header], body:rows, foot, startY:tablaY,
     styles:{fontSize:7,cellPadding:3}, headStyles:{fillColor:[76,110,245]},
@@ -2492,7 +2609,7 @@ async function exportInformePDF() {
     },
   });
   const blob=doc.output('blob');
-  const filename=`informe_${S.informesTipo==='fichajes'?'fichajes':'registros'}_${dateStamp()}.pdf`;
+  const filename=nombreArchivoInforme('pdf');
   const result=await dlBlob(filename,blob);
   if(result===null) return;
   showSaveDlg(filename,'pdf',blob.size,'informes',result);

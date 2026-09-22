@@ -120,6 +120,15 @@ es lo de debajo — y unas pocas cosas que se ven.
   viaje del Historial, gráfica «Tiempo de irradiación del operador» del
   Dashboard y Fichaje. Las horas del reloj (entrada, salida, inicio de la
   ida…) siguen como HH:MM.
+- **Filtros en Informes** (opcionales): en *fichajes*, por **usuario** (un
+  administrador elige a quién; el resto solo ve los suyos); en *registros*,
+  por **conductor**, **guardado por** (usuario) e **irradiador**, combinables.
+  La vista previa, los totales Σ, el CSV y el PDF usan solo lo filtrado; el
+  nombre del archivo incluye el filtro (`informe_fichajes_ana_….pdf`) y la
+  cabecera del PDF muestra el periodo y el filtro aplicado. «Quitar filtros»
+  vuelve a mostrar todo.
+- Los campos de fecha ya no se salen de su tarjeta en móviles estrechos
+  (pasaba en Informes e Historial).
 - Aviso **«Hay una versión nueva de la app → Actualizar»**.
 - La ventana «Exportación completada» ya no inventa rutas de archivo.
 - Accesibilidad: foco visible con teclado, Esc cierra los diálogos,
@@ -138,7 +147,7 @@ es lo de debajo — y unas pocas cosas que se ven.
   todas las pantallas, XSS, sesión, sin conexión, exportaciones, CSP—:
   `npm i --no-save playwright && npx playwright install chromium` y luego
   `node --import ./tests/helpers/register.mjs tests/e2e/smoke.e2e.mjs`
-  (también `features.e2e.mjs`, `extras.e2e.mjs` y `xss.e2e.mjs`). Ninguna necesita Supabase.
+  (también `features.e2e.mjs`, `extras.e2e.mjs`, `informes.e2e.mjs` y `xss.e2e.mjs`). Ninguna necesita Supabase.
 - `npm run check` comprueba la sintaxis de todo.
 
 ### Limitaciones conocidas / siguientes pasos recomendados
