@@ -120,13 +120,29 @@ es lo de debajo — y unas pocas cosas que se ven.
   viaje del Historial, gráfica «Tiempo de irradiación del operador» del
   Dashboard y Fichaje. Las horas del reloj (entrada, salida, inicio de la
   ida…) siguen como HH:MM.
+- **Dos tipos de informe nuevos: Conducción — Viajes y Conducción —
+  Repostajes.** *Viajes* trae fecha, vehículo, obra, guardado por, km
+  inicial/final y **Km recorridos** (marcable con Σ suma: cada fila es el
+  kilometraje **parcial** de ese viaje, y el total de abajo es la suma del
+  periodo — y del filtro — completo). *Repostajes* trae fecha, vehículo,
+  obra, guardado por, estación, combustible, litros, precio/L, **importe**
+  (Σ suma → dinero gastado) y el km del cuentakilómetros en ese repostaje
+  (se muestra por fila, no se suma: es una lectura, no una distancia).
 - **Filtros en Informes** (opcionales): en *fichajes*, por **usuario** (un
   administrador elige a quién; el resto solo ve los suyos); en *registros*,
-  por **conductor**, **guardado por** (usuario) e **irradiador**, combinables.
+  por **conductor**, **guardado por** (usuario) e **irradiador**,
+  combinables; en *viajes/repostajes*, por **vehículo** y **guardado por**.
   La vista previa, los totales Σ, el CSV y el PDF usan solo lo filtrado; el
-  nombre del archivo incluye el filtro (`informe_fichajes_ana_….pdf`) y la
-  cabecera del PDF muestra el periodo y el filtro aplicado. «Quitar filtros»
-  vuelve a mostrar todo.
+  nombre del archivo incluye el filtro (`informe_fichajes_ana_….pdf`,
+  `informe_viajes_1234-abc_….pdf`) y la cabecera del PDF muestra el periodo
+  y el filtro aplicado. «Quitar filtros» vuelve a mostrar todo.
+- **Corrección**: `listarViajes`/`listarRepostajes` se quedaban siempre en
+  las últimas 500 filas, sin avisar — un informe de kilómetros o de gasto
+  de un periodo con más de 500 viajes o repostajes habría dado un total
+  incorrecto en silencio. Los Informes ahora piden el periodo completo
+  (paginado, hasta 10 000, con el mismo aviso de recorte que Historial y
+  Fichajes); la lista rápida de la pantalla Conducción sigue igual de
+  ligera (500 filas le sobran de sobra, solo enseña las últimas 30).
 - Los campos de fecha ya no se salen de su tarjeta en móviles estrechos
   (pasaba en Informes e Historial).
 - Aviso **«Hay una versión nueva de la app → Actualizar»**.
@@ -141,7 +157,7 @@ es lo de debajo — y unas pocas cosas que se ven.
   (`api/_lib/http.js`: método, sesión, errores), validación
   (`validate.js`), utilidades de base de datos (`db.js`) y auditoría
   (`audit.js`). Cada endpoint queda con solo su lógica.
-- **Pruebas automáticas**: `npm install && npm test` (25 pruebas de la API
+- **Pruebas automáticas**: `npm install && npm test` (26 pruebas de la API
   con una base de datos simulada, sin necesitar Supabase). En
   `tests/e2e/` hay pruebas en navegador real (Chromium) —recorrido por
   todas las pantallas, XSS, sesión, sin conexión, exportaciones, CSP—:

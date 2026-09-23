@@ -713,6 +713,8 @@
       <select id="informeTipo" onchange="cambiarTipoInforme()">
         <option value="registros">Registros de irradiación</option>
         <option value="fichajes">Fichajes (control horario)</option>
+        <option value="viajes">Conducción — Viajes</option>
+        <option value="repostajes">Conducción — Repostajes</option>
       </select>
     </div>
 
@@ -743,6 +745,12 @@
       <div id="iFiltrosFichajes" style="display:none;flex-direction:column;gap:10px">
         <div class="fl"><label for="iUsuarioFich">Usuario</label>
           <select id="iUsuarioFich" onchange="aplicarFiltrosInforme()"><option value="">Todos los usuarios</option></select></div>
+      </div>
+      <div id="iFiltrosConduccion" style="display:none;flex-direction:column;gap:10px">
+        <div class="fl"><label for="iVehiculo">Vehículo</label>
+          <select id="iVehiculo" onchange="aplicarFiltrosInforme()"><option value="">Todos los vehículos</option></select></div>
+        <div class="fl"><label for="iUsuarioCond">Guardado por</label>
+          <select id="iUsuarioCond" onchange="aplicarFiltrosInforme()"><option value="">Todos</option></select></div>
       </div>
       <div style="display:flex;gap:10px;margin-top:12px">
         <button class="btn bo bs" onclick="limpiarFiltrosInforme()">Quitar filtros</button>
@@ -925,7 +933,7 @@
         <summary>Historial, Informes y exportar</summary>
         <ul class="help-list">
           <li><b>Historial</b>: busca por texto, filtra por fechas, conductor, irradiador o estado, y exporta lo que estás viendo (CSV, Excel, PDF).</li>
-          <li><b>Informes</b>: elige el tipo (registros o fichajes), los campos (con <b>Σ suma</b> para totales), el periodo y, si quieres, un <b>filtro</b> (usuario en fichajes; conductor, usuario o irradiador en registros: los totales solo suman lo filtrado). Revisa la vista previa antes de exportar. Las duraciones (horas de más, duración de la irradiación) se muestran en formato <b>h:mm</b>, por ejemplo 0:30.</li>
+          <li><b>Informes</b>: elige el tipo (registros, fichajes, o conducción — viajes/repostajes), los campos (con <b>Σ suma</b> para totales), el periodo y, si quieres, un <b>filtro</b> (usuario en fichajes; conductor, usuario o irradiador en registros; vehículo o usuario en viajes/repostajes — los totales solo suman lo filtrado). En viajes, la Σ de «Km recorridos» da el total de kilómetros del periodo; en repostajes, la Σ de «Importe» da el gasto total. Revisa la vista previa antes de exportar. Las duraciones (horas de más, duración de la irradiación) se muestran en formato <b>h:mm</b>, por ejemplo 0:30.</li>
         </ul>
       </details>
       <details class="help-det">

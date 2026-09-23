@@ -2292,10 +2292,38 @@ const CAMPOS_INFORME_FICHAJES=[
     get:r=>(r.horas_de_mas!=null&&r.horas_de_mas!=='')?formatHorasHM(r.horas_de_mas):'',
     sum:r=>parseFloat(r.horas_de_mas)||0},
 ];
+// Campos disponibles para el informe de Conducción — Viajes. "Km recorridos" es el
+// dato "parcial" de cada viaje; su Σ suma es el "total" de kilómetros del periodo (y del filtro elegido).
+const CAMPOS_INFORME_VIAJES=[
+  {id:'fecha',        label:'Fecha',            grupo:'Viaje', get:r=>r.fecha?fmt(pd(r.fecha)):''},
+  {id:'matricula',    label:'Vehículo (matrícula)', grupo:'Viaje', get:r=>r.matricula||''},
+  {id:'obra',         label:'Obra',             grupo:'Viaje', get:r=>(r.vehiculos&&r.vehiculos.numero_obra)||''},
+  {id:'guardadoPor',  label:'Guardado por',     grupo:'Viaje', get:r=>r.creado_por||''},
+  {id:'kmInicial',    label:'Km inicial',       grupo:'Kilómetros', get:r=>r.km_inicial??''},
+  {id:'kmFinal',      label:'Km final',         grupo:'Kilómetros', get:r=>r.km_final??''},
+  {id:'kmRecorridos', label:'Km recorridos (parcial)', grupo:'Kilómetros', get:r=>r.km_recorridos??'', sumable:true},
+];
+// Campos disponibles para el informe de Conducción — Repostajes.
+const CAMPOS_INFORME_REPOSTAJES=[
+  {id:'fecha',          label:'Fecha',              grupo:'Repostaje', get:r=>r.fecha?fmt(pd(r.fecha)):''},
+  {id:'matricula',      label:'Vehículo (matrícula)', grupo:'Repostaje', get:r=>r.matricula||''},
+  {id:'obra',           label:'Obra',               grupo:'Repostaje', get:r=>(r.vehiculos&&r.vehiculos.numero_obra)||''},
+  {id:'guardadoPor',    label:'Guardado por',       grupo:'Repostaje', get:r=>r.creado_por||''},
+  {id:'estacion',       label:'Estación',           grupo:'Repostaje', get:r=>(r.estaciones_servicio&&r.estaciones_servicio.nombre)||r.estacion_servicio||''},
+  {id:'tipoCombustible',label:'Combustible',        grupo:'Repostaje', get:r=>FUEL_LABELS[r.tipo_combustible]||''},
+  {id:'km',             label:'Km de repostaje (cuentakilómetros)', grupo:'Kilómetros', get:r=>r.km??''},
+  {id:'litros',         label:'Litros',             grupo:'Importe', get:r=>r.litros??'', sumable:true},
+  {id:'precioLitro',    label:'Precio/L (€)',       grupo:'Importe', get:r=>r.precio_litro??''},
+  {id:'importe',        label:'Importe (€)',        grupo:'Importe', get:r=>r.importe??'', sumable:true},
+];
 // Catálogo de campos activo según el tipo de informe elegido.
 function camposInformeCatalogo() {
-  return S.informesTipo==='fichajes' ? CAMPOS_INFORME_FICHAJES : CAMPOS_INFORME;
+  if(S.informesTipo==='fichajes')   return CAMPOS_INFORME_FICHAJES;
+  if(S.informesTipo==='viajes')     return CAMPOS_INFORME_VIAJES;
+  if(S.informesTipo==='repostajes') return CAMPOS_INFORME_REPOSTAJES;
+  return CAMPOS_INFORME;
 }
+function esInformeConduccion() { return S.informesTipo==='viajes'||S.informesTipo==='repostajes'; }
 function cambiarTipoInforme() {
   S.informesTipo=document.getElementById('informeTipo').value;
   S.informesRaw=[]; S.informesTodo=[]; S.informesBuscado=false; S.informesPeriodo=null;
@@ -2312,7 +2340,8 @@ function cambiarTipoInforme() {
 const nombreCompletoDe = (u) => [u.nombre,u.apellido1,u.apellido2].filter(Boolean).join(' ');
 function valoresFiltrosInforme() {
   const v=id=>{ const e=document.getElementById(id); return e?e.value:''; };
-  return { conductor:v('iConductor'), usuario:v('iUsuario'), irradiador:v('iIrradiador'), usuarioFich:v('iUsuarioFich') };
+  return { conductor:v('iConductor'), usuario:v('iUsuario'), irradiador:v('iIrradiador'), usuarioFich:v('iUsuarioFich'),
+           vehiculo:v('iVehiculo'), usuarioCond:v('iUsuarioCond') };
 }
 function textoSeleccionado(id) {
   const e=document.getElementById(id);
@@ -2322,6 +2351,9 @@ function descripcionFiltrosInforme() {
   const partes=[];
   if(S.informesTipo==='fichajes'){
     const u=textoSeleccionado('iUsuarioFich'); if(u) partes.push('Usuario: '+u.split(' — ')[0]);
+  } else if(esInformeConduccion()){
+    const v=textoSeleccionado('iVehiculo'), u=textoSeleccionado('iUsuarioCond');
+    if(v) partes.push('Vehículo: '+v); if(u) partes.push('Guardado por: '+u.split(' — ')[0]);
   } else {
     const c=textoSeleccionado('iConductor'), u=textoSeleccionado('iUsuario'), i=textoSeleccionado('iIrradiador');
     if(c) partes.push('Conductor: '+c); if(u) partes.push('Guardado por: '+u.split(' — ')[0]); if(i) partes.push('Irradiador: '+i);
@@ -2356,6 +2388,22 @@ function poblarFiltrosInforme(items) {
   items.forEach(r=>{ if(r.conductor_nick&&!cond.has(r.conductor_nick)) cond.set(r.conductor_nick,r.conductor_nombre||r.conductor_nick); });
   const guard=new Map(usuarios.map(u=>[u.nick, (nombreCompletoDe(u)&&nombreCompletoDe(u)!==u.nick)?`${u.nick} — ${nombreCompletoDe(u)}`:u.nick]));
   items.forEach(r=>{ if(r.creado_por&&!guard.has(r.creado_por)) guard.set(r.creado_por,r.creado_por); });
+  if(esInformeConduccion()){
+    // Clave = matrícula (es única y ya viene normalizada en mayúsculas): así el filtro también
+    // encuentra vehículos que ya no están activos, siempre que aparezcan en los datos del periodo.
+    const veh=new Map();
+    LS.vehiculoCache().forEach(v=>veh.set(v.matricula, v.matricula+(v.numero_obra?' · Obra '+v.numero_obra:'')));
+    items.forEach(r=>{
+      if(!r.matricula||veh.has(r.matricula)) return;
+      const obra=r.vehiculos&&r.vehiculos.numero_obra;
+      veh.set(r.matricula, r.matricula+(obra?' · Obra '+obra:''));
+    });
+    const guardCond=new Map(usuarios.map(u=>[u.nick, (nombreCompletoDe(u)&&nombreCompletoDe(u)!==u.nick)?`${u.nick} — ${nombreCompletoDe(u)}`:u.nick]));
+    items.forEach(r=>{ if(r.creado_por&&!guardCond.has(r.creado_por)) guardCond.set(r.creado_por,r.creado_por); });
+    set('iVehiculo',[...veh.entries()].sort(es),'Todos los vehículos');
+    set('iUsuarioCond',[...guardCond.entries()].sort(es),'Todos');
+    return;
+  }
   const irr=new Set(LS.irradiadorCache().map(nombreCompletoDe).filter(Boolean));
   items.forEach(r=>{ const n=r.irradiador_nombre||r.irradiador; if(n) irr.add(n); });
   set('iConductor',[...cond.entries()].sort(es),'Todos');
@@ -2363,22 +2411,24 @@ function poblarFiltrosInforme(items) {
   set('iIrradiador',[...irr].sort((a,b)=>a.localeCompare(b,'es')).map(n=>[n,n]),'Todos');
 }
 function mostrarFiltrosSegunTipo() {
-  const fich=S.informesTipo==='fichajes';
-  const a=document.getElementById('iFiltrosRegistros'), b=document.getElementById('iFiltrosFichajes');
-  if(a) a.style.display=fich?'none':'flex';
-  if(b) b.style.display=fich?'flex':'none';
+  const fich=S.informesTipo==='fichajes', cond=esInformeConduccion();
+  const grupoVisible={iFiltrosRegistros:!fich&&!cond, iFiltrosFichajes:fich, iFiltrosConduccion:cond};
+  Object.entries(grupoVisible).forEach(([id,visible])=>{ const el=document.getElementById(id); if(el) el.style.display=visible?'flex':'none'; });
   const hint=document.getElementById('informeFiltrosHint');
-  if(hint) hint.textContent=fich
+  if(hint) hint.textContent = fich
     ? (S.isAdmin?'Elige un usuario para ver solo sus fichajes; si lo dejas en «Todos los usuarios» el total suma a todos.':'Aquí solo aparecen tus propios fichajes.')
-    : 'Elige un conductor, un usuario o un irradiador para ver solo sus registros; los totales Σ se calculan solo con lo filtrado.';
+    : cond
+      ? 'Elige un vehículo o un usuario para ver solo lo suyo; los totales Σ (kilómetros, litros, importe) se calculan solo con lo filtrado.'
+      : 'Elige un conductor, un usuario o un irradiador para ver solo sus registros; los totales Σ se calculan solo con lo filtrado.';
 }
 function iniciarFiltrosInforme() {
-  ['iConductor','iUsuario','iIrradiador','iUsuarioFich'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
+  ['iConductor','iUsuario','iIrradiador','iUsuarioFich','iVehiculo','iUsuarioCond'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
   mostrarFiltrosSegunTipo();
   poblarFiltrosInforme([]);
-  // Catálogos actualizados (si hay conexión) para que aparezcan también usuarios/irradiadores nuevos
+  // Catálogos actualizados (si hay conexión) para que aparezcan también usuarios/irradiadores/vehículos nuevos
   refreshDrivers().then(()=>poblarFiltrosInforme(S.informesTodo));
-  if(S.informesTipo!=='fichajes') refreshIrradiadores().then(()=>poblarFiltrosInforme(S.informesTodo));
+  if(S.informesTipo==='registros') refreshIrradiadores().then(()=>poblarFiltrosInforme(S.informesTodo));
+  if(esInformeConduccion()) refreshVehiculos().then(()=>poblarFiltrosInforme(S.informesTodo));
 }
 function filtrarRegistrosInforme(items) {
   const f=valoresFiltrosInforme();
@@ -2389,6 +2439,19 @@ function filtrarRegistrosInforme(items) {
   if(f.irradiador) regs=regs.filter(r=>(r.irradiador_nombre||r.irradiador)===f.irradiador);
   return regs;
 }
+function filtrarConduccionInforme(items) {
+  const f=valoresFiltrosInforme();
+  const igual=(a,b)=>String(a||'').toLowerCase()===String(b||'').toLowerCase();
+  let regs=items||[];
+  if(f.vehiculo)    regs=regs.filter(r=>igual(r.matricula,f.vehiculo));
+  if(f.usuarioCond) regs=regs.filter(r=>igual(r.creado_por,f.usuarioCond));
+  return regs;
+}
+function filtrarSegunTipoInforme(items) {
+  if(S.informesTipo==='fichajes') return items;               // el filtro de usuario ya lo aplica el servidor
+  if(esInformeConduccion()) return filtrarConduccionInforme(items);
+  return filtrarRegistrosInforme(items);
+}
 function actualizarResultadoInforme() {
   const note=document.getElementById('informesNote');
   const n=S.informesRaw.length, f=descripcionFiltrosInforme();
@@ -2398,20 +2461,21 @@ function actualizarResultadoInforme() {
 function aplicarFiltrosInforme() {
   if(!S.informesBuscado) return;                       // se aplicará al pulsar Buscar
   if(S.informesTipo==='fichajes') { buscarInformes(); return; }   // el filtro de usuario lo aplica el servidor
-  S.informesRaw=filtrarRegistrosInforme(S.informesTodo);
+  S.informesRaw=filtrarSegunTipoInforme(S.informesTodo);
   actualizarResultadoInforme();
 }
 function limpiarFiltrosInforme() {
-  ['iConductor','iUsuario','iIrradiador'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
+  ['iConductor','iUsuario','iIrradiador','iVehiculo','iUsuarioCond'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
   const u=document.getElementById('iUsuarioFich'); if(u&&!u.disabled) u.value='';
   aplicarFiltrosInforme();
 }
 // Nombre del archivo exportado: incluye el filtro elegido (p. ej. informe_fichajes_ana_20260920.pdf)
 function nombreArchivoInforme(ext) {
   const f=valoresFiltrosInforme();
-  const partes=S.informesTipo==='fichajes'?[f.usuarioFich]:[f.conductor,f.usuario,f.irradiador];
+  const tipoArchivo=S.informesTipo==='fichajes'?'fichajes':S.informesTipo==='viajes'?'viajes':S.informesTipo==='repostajes'?'repostajes':'registros';
+  const partes=S.informesTipo==='fichajes'?[f.usuarioFich]:esInformeConduccion()?[f.vehiculo,f.usuarioCond]:[f.conductor,f.usuario,f.irradiador];
   const slug=partes.filter(Boolean).map(x=>String(x).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')).filter(Boolean).join('_').slice(0,50);
-  return `informe_${S.informesTipo==='fichajes'?'fichajes':'registros'}${slug?'_'+slug:''}_${dateStamp()}.${ext}`;
+  return `informe_${tipoArchivo}${slug?'_'+slug:''}_${dateStamp()}.${ext}`;
 }
 function renderCamposInforme() {
   const box=document.getElementById('camposInformeBox');
@@ -2540,6 +2604,12 @@ async function buscarInformes() {
       const usuarioNick=valoresFiltrosInforme().usuarioFich||undefined;
       const data=await apiPost('/fichajes',{action:'listar',token:LS.token(),payload:{desde,hasta,usuarioNick}});
       items=data.fichajes||[]; S.informesTruncado=!!data.truncado;
+    }else if(S.informesTipo==='viajes'){
+      const data=await apiPost('/conduccion',{action:'listarViajes',token:LS.token(),payload:{desde,hasta,completo:true}});
+      items=data.viajes||[]; S.informesTruncado=!!data.truncado;
+    }else if(S.informesTipo==='repostajes'){
+      const data=await apiPost('/conduccion',{action:'listarRepostajes',token:LS.token(),payload:{desde,hasta,completo:true}});
+      items=data.repostajes||[]; S.informesTruncado=!!data.truncado;
     }else{
       const data=await apiPost('/registros',{action:'listar',token:LS.token(),payload:{desde,hasta}});
       items=data.registros||[]; S.informesTruncado=!!data.truncado;
@@ -2547,7 +2617,7 @@ async function buscarInformes() {
     setCloudState('ok');
     S.informesTodo=items; S.informesBuscado=true; S.informesPeriodo={desde,hasta};
     poblarFiltrosInforme(items);
-    S.informesRaw=S.informesTipo==='fichajes'?items:filtrarRegistrosInforme(items);
+    S.informesRaw=filtrarSegunTipoInforme(items);
     actualizarResultadoInforme();
   }catch(e){
     setCloudState(e.isNetwork?'off':'err');
@@ -2592,7 +2662,8 @@ async function exportInformePDF() {
   const {jsPDF}=window.jspdf;
   const doc=new jsPDF({orientation:'landscape',unit:'pt',compress:true});
   const logo=await cargarLogoInforme('img/mosquito_logo_team.png');
-  const titulo=S.informesTipo==='fichajes' ? 'Values Irradiation WEB-210 — Informe de fichajes' : 'Values Irradiation WEB-210 — Informe';
+  const TITULOS_INFORME={fichajes:'Informe de fichajes', viajes:'Informe de viajes', repostajes:'Informe de repostajes', registros:'Informe'};
+  const titulo=`Values Irradiation WEB-210 — ${TITULOS_INFORME[S.informesTipo]||TITULOS_INFORME.registros}`;
   const per=S.informesPeriodo;
   const periodo=(per&&(per.desde||per.hasta))?`Periodo: ${per.desde?fmt(pd(per.desde)):'…'} – ${per.hasta?fmt(pd(per.hasta)):'…'}`:'';
   const detalle=[periodo,descripcionFiltrosInforme()].filter(Boolean).join('   ·   ');

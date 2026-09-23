@@ -333,6 +333,21 @@ test("conducción: valida km, combustible y propiedad de los datos", async () =>
   assert.equal((await api("conduccion", "eliminarViaje", ana, { id: viajes.body.viajes[0].id })).status, 200);
 });
 
+test("conducción: listarViajes/listarRepostajes sin 'completo' se quedan en 500 (lista rápida); con 'completo' traen todo y avisan si aún así se pasa de 10000", async () => {
+  const admin = await login("Admin");
+  db.tables.vehiculo_viajes = Array.from({ length: 620 }, (_, i) => ({ id: "v" + i, matricula: "1234 ABC", vehiculo_id: "veh-1", fecha: "2026-09-01", km_recorridos: 10, creado_por: "Admin", created_at: new Date(2026, 8, 1, 0, 0, i).toISOString() }));
+  const rapida = await api("conduccion", "listarViajes", admin, {});
+  assert.equal(rapida.body.viajes.length, 500);
+  assert.equal(rapida.body.truncado, undefined, "la lista rápida no lleva bandera de recorte");
+  const completa = await api("conduccion", "listarViajes", admin, { completo: true });
+  assert.equal(completa.body.viajes.length, 620);
+  assert.equal(completa.body.truncado, false);
+  db.tables.repostajes = Array.from({ length: 10500 }, (_, i) => ({ id: "r" + i, matricula: "1234 ABC", vehiculo_id: "veh-1", fecha: "2026-09-01", importe: 1, creado_por: "Admin", created_at: new Date(2026, 8, 1, 0, 0, i % 60).toISOString() }));
+  const muchisimos = await api("conduccion", "listarRepostajes", admin, { completo: true });
+  assert.equal(muchisimos.body.repostajes.length, 10000);
+  assert.equal(muchisimos.body.truncado, true);
+});
+
 test("estaciones e irradiadores: solo admin gestiona; nombres validados", async () => {
   const ana = await login("ana"), admin = await login("Admin");
   assert.equal((await api("estaciones", "crear", ana, { nombre: "Repsol  Norte" })).status, 200);

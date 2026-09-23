@@ -101,6 +101,76 @@ check("Cambiar a bob recalcula: 2 fichajes, total 1:30", (await filas()) === 2 &
 await page.selectOption("#iUsuarioFich", ""); await w(900);
 check("Volver a «Todos los usuarios»", (await filas()) === 4 && /3:15/.test(await pie()));
 
+// ═════════ Informe de CONDUCCIÓN — Viajes ═════════
+db.tables.vehiculos = [
+  { id: crypto.randomUUID(), matricula: "1234 ABC", numero_obra: "OB-1", activo: true },
+  { id: crypto.randomUUID(), matricula: "9999 ZZZ", numero_obra: "OB-2", activo: true },
+];
+const [veh1, veh2] = db.tables.vehiculos;
+const viaje = (o) => ({ id: crypto.randomUUID(), created_at: AHORA, fecha: dia(1), ...o });
+db.tables.vehiculo_viajes = [
+  viaje({ matricula: veh1.matricula, vehiculo_id: veh1.id, km_inicial: 100, km_final: 150, km_recorridos: 50, creado_por: "ana" }),
+  viaje({ matricula: veh1.matricula, vehiculo_id: veh1.id, km_inicial: 150, km_final: 210, km_recorridos: 60, creado_por: "bob" }),
+  viaje({ matricula: veh2.matricula, vehiculo_id: veh2.id, km_inicial: 500, km_final: 545, km_recorridos: 45, creado_por: "ana" }),
+];
+await ev(() => go("informes")); await w(600);
+await page.selectOption("#informeTipo", "viajes"); await w(700);
+check("Con «viajes» solo se ve el filtro de conducción", (await ev(() => document.getElementById("iFiltrosConduccion").style.display)) === "flex" && (await ev(() => document.getElementById("iFiltrosRegistros").style.display)) === "none");
+const vehiculosOpt = await opciones("iVehiculo");
+check("Filtro de vehículo con la flota (incluye vehículos sin viajes en el periodo)", vehiculosOpt.some((t) => t.startsWith("1234 ABC")) && vehiculosOpt.some((t) => t.startsWith("9999 ZZZ")));
+await sumar(["kmRecorridos"]);
+await ev(() => buscarInformes()); await w(900);
+check("Sin filtro: 3 viajes y el total de todos (155 km)", (await filas()) === 3 && /155/.test(await pie()), await pie());
+await page.selectOption("#iVehiculo", "1234 ABC"); await w(300);
+check("Filtro por vehículo 1234 ABC: 2 viajes, total parcial+total = 110 km (no la suma de toda la flota)", (await filas()) === 2 && /110/.test(await pie()) && !/155/.test(await pie()) && /Vehículo: 1234 ABC/.test(await nota()), (await pie()) + " | " + (await nota()));
+const filaKm = await ev(() => [...document.querySelectorAll("#vistaPreviaTabla tbody tr")].map((r) => r.innerText));
+check("Cada fila muestra su km «parcial» (50 y 60), no solo el total", filaKm.some((t) => /\b50\b/.test(t)) && filaKm.some((t) => /\b60\b/.test(t)), filaKm.join(" | "));
+await page.selectOption("#iUsuarioCond", "ana"); await w(300);
+check("Vehículo 1234 ABC + guardado por ana: 1 viaje, 50 km", (await filas()) === 1 && /\b50\b/.test(await pie()), await pie());
+const csvV = await descargar(() => exportInformeCSV());
+check("CSV de viajes: nombre con el vehículo y el usuario filtrados", /^informe_viajes_1234-abc_ana_/.test(csvV.nombre), csvV.nombre);
+await cerrarDialogo();
+await ev(() => limpiarFiltrosInforme()); await w(300);
+
+// Más de 500 viajes en el periodo: antes se recortaban en silencio (límite de 500 en la API); ahora se traen todos.
+const muchos = Array.from({ length: 620 }, (_, i) => viaje({ id: "auto-" + i, matricula: veh1.matricula, vehiculo_id: veh1.id, km_inicial: 0, km_final: 10, km_recorridos: 10, creado_por: "ana", created_at: new Date(Date.now() - i * 1000).toISOString() }));
+db.tables.vehiculo_viajes = muchos;
+await ev(() => buscarInformes()); await w(1500);
+check("Periodo con 620 viajes: el informe los trae TODOS (antes se cortaba en 500) y el total es exacto (6200 km)", (await ev(() => S.informesRaw.length)) === 620 && /6200/.test(await pie()) && !/Hay más de 10/.test(await nota()), (await ev(() => S.informesRaw.length)) + " | " + (await pie()));
+db.tables.vehiculo_viajes = [
+  { id: crypto.randomUUID(), created_at: AHORA, fecha: dia(1), matricula: veh1.matricula, vehiculo_id: veh1.id, km_inicial: 100, km_final: 150, km_recorridos: 50, creado_por: "ana" },
+  { id: crypto.randomUUID(), created_at: AHORA, fecha: dia(1), matricula: veh1.matricula, vehiculo_id: veh1.id, km_inicial: 150, km_final: 210, km_recorridos: 60, creado_por: "bob" },
+  { id: crypto.randomUUID(), created_at: AHORA, fecha: dia(1), matricula: veh2.matricula, vehiculo_id: veh2.id, km_inicial: 500, km_final: 545, km_recorridos: 45, creado_por: "ana" },
+];
+
+// ═════════ Informe de CONDUCCIÓN — Repostajes ═════════
+db.tables.estaciones_servicio = [{ id: crypto.randomUUID(), nombre: "Repsol Norte", activo: true }];
+const repo = (o) => ({ id: crypto.randomUUID(), created_at: AHORA, fecha: dia(1), estacion_id: db.tables.estaciones_servicio[0].id, estaciones_servicio: { nombre: "Repsol Norte" }, ...o });
+db.tables.repostajes = [
+  repo({ matricula: veh1.matricula, vehiculo_id: veh1.id, km: 150, importe: 60.5, precio_litro: 1.5, litros: 40, tipo_combustible: "diesel", creado_por: "ana" }),
+  repo({ matricula: veh1.matricula, vehiculo_id: veh1.id, km: 310, importe: 39.5, precio_litro: 1.58, litros: 25, tipo_combustible: "diesel", creado_por: "bob" }),
+  repo({ matricula: veh2.matricula, vehiculo_id: veh2.id, km: 545, importe: 20, precio_litro: 2, litros: 10, tipo_combustible: "adblue", creado_por: "ana" }),
+];
+await ev(() => go("informes")); await w(600);
+await page.selectOption("#informeTipo", "repostajes"); await w(700);
+await sumar(["importe", "litros"]);
+await ev(() => buscarInformes()); await w(900);
+check("Repostajes sin filtro: 3 y el total de gasto (120 €) y litros (75 L) de todos", (await filas()) === 3 && /120\.00/.test(await pie()) && /75\.00/.test(await pie()), await pie());
+await page.selectOption("#iVehiculo", "1234 ABC"); await w(300);
+check("Filtro por vehículo 1234 ABC: gasto 100 € (60.5+39.5), no los 120 € de toda la flota", (await filas()) === 2 && /100\.00/.test(await pie()) && !/120\.00/.test(await pie()), await pie());
+const kmRepo = await ev(() => [...document.querySelectorAll("#vistaPreviaTabla tbody tr")].map((r) => r.innerText).join(" "));
+check("El km de repostaje se ve por fila (150, 310) pero no se suma (es un cuentakilómetros, no una distancia)", /\b150\b/.test(kmRepo) && /\b310\b/.test(kmRepo));
+await page.selectOption("#iUsuarioCond", "bob"); await w(300);
+check("Vehículo 1234 ABC + guardado por bob: 1 repostaje, 39.50 €", (await filas()) === 1 && /39\.50/.test(await pie()), await pie());
+const csvR = await descargar(() => exportInformeCSV());
+check("CSV de repostajes: nombre del archivo con los filtros aplicados", /^informe_repostajes_1234-abc_bob_/.test(csvR.nombre) && /39[.,]5/.test(csvR.texto.toString()), csvR.nombre);
+await cerrarDialogo();
+const pdfR = await descargar(() => exportInformePDF());
+check("PDF de repostajes: se genera y la cabecera indica «Informe de repostajes»", pdfR.texto.length > 3000 && (await ev(() => window.__pdfTexts || [])).some((t) => /Informe de repostajes/.test(t)));
+await cerrarDialogo();
+await ev(() => limpiarFiltrosInforme()); await w(300);
+check("«Quitar filtros» en repostajes vuelve a los 3 / 120 €", (await filas()) === 3 && /120\.00/.test(await pie()));
+
 // ═════════ Usuario normal ═════════
 await ev(() => logout()); await entrar("ana");
 await ev(() => go("informes")); await w(800);

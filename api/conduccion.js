@@ -11,10 +11,14 @@
 //                              repostaje, filtrado también por tipo de
 //                              combustible si se indica), para autorrellenar
 //                              los formularios de Conducción
+// action:"listarViajes"/"listarRepostajes" con payload.completo:true -> trae TODO el periodo (paginado,
+//                              hasta 10 000, con "truncado" si aun así sobra) en vez de solo las últimas
+//                              500 filas; lo usan los Informes para que los totales sean exactos.
 
 import { apiHandler, ErrorHttp } from "./_lib/http.js";
 import { texto, numero, fecha, uuid } from "./_lib/validate.js";
 import { auditar } from "./_lib/audit.js";
+import { leerTodo } from "./_lib/db.js";
 
 const TIPOS_COMBUSTIBLE = ["diesel_xtl", "diesel", "gasolina", "adblue"];
 const KM_MAX = 5_000_000;
@@ -57,10 +61,25 @@ export default apiHandler(async ({ res, action, payload, sesion, supabase }) => 
   if (action === "listarViajes") {
     const desde = fecha(payload.desde, "La fecha «desde»");
     const hasta = fecha(payload.hasta, "La fecha «hasta»");
-    let q = supabase.from("vehiculo_viajes").select("*, vehiculos(numero_obra)").order("fecha", { ascending: false }).order("created_at", { ascending: false }).limit(500);
-    if (desde) q = q.gte("fecha", desde);
-    if (hasta) q = q.lte("fecha", hasta);
-    const { data, error } = await q;
+    const construir = () => {
+      let q = supabase
+        .from("vehiculo_viajes")
+        .select("*, vehiculos(numero_obra)")
+        .order("fecha", { ascending: false })
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true }); // desempate: las páginas de 500/1000 no se solapan ni se saltan filas
+      if (desde) q = q.gte("fecha", desde);
+      if (hasta) q = q.lte("fecha", hasta);
+      return q;
+    };
+    // La pantalla de Conducción solo enseña los últimos 30 (le basta una página de 500).
+    // Los Informes necesitan TODOS los viajes del periodo para que los totales (km recorridos) sean
+    // correctos: piden payload.completo, y entonces se pagina hasta 10 000, igual que en /registros.
+    if (payload.completo) {
+      const { filas, truncado } = await leerTodo(construir);
+      return res.status(200).json({ viajes: filas, truncado });
+    }
+    const { data, error } = await construir().limit(500);
     if (error) throw error;
     return res.status(200).json({ viajes: data });
   }
@@ -105,10 +124,24 @@ export default apiHandler(async ({ res, action, payload, sesion, supabase }) => 
   if (action === "listarRepostajes") {
     const desde = fecha(payload.desde, "La fecha «desde»");
     const hasta = fecha(payload.hasta, "La fecha «hasta»");
-    let q = supabase.from("repostajes").select("*, vehiculos(numero_obra), estaciones_servicio(nombre)").order("fecha", { ascending: false }).order("created_at", { ascending: false }).limit(500);
-    if (desde) q = q.gte("fecha", desde);
-    if (hasta) q = q.lte("fecha", hasta);
-    const { data, error } = await q;
+    const construir = () => {
+      let q = supabase
+        .from("repostajes")
+        .select("*, vehiculos(numero_obra), estaciones_servicio(nombre)")
+        .order("fecha", { ascending: false })
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true });
+      if (desde) q = q.gte("fecha", desde);
+      if (hasta) q = q.lte("fecha", hasta);
+      return q;
+    };
+    // Igual que en listarViajes: la lista rápida de Conducción se queda en 500 filas; los Informes
+    // piden payload.completo para traer todo el periodo (paginado) y así sumar el gasto real.
+    if (payload.completo) {
+      const { filas, truncado } = await leerTodo(construir);
+      return res.status(200).json({ repostajes: filas, truncado });
+    }
+    const { data, error } = await construir().limit(500);
     if (error) throw error;
     return res.status(200).json({ repostajes: data });
   }
