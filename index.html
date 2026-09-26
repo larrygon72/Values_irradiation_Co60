@@ -715,6 +715,7 @@
         <option value="fichajes">Fichajes (control horario)</option>
         <option value="viajes">Conducción — Viajes</option>
         <option value="repostajes">Conducción — Repostajes</option>
+        <option value="anuario">Anuario (informe profesional)</option>
       </select>
     </div>
 
@@ -768,7 +769,7 @@
     </div>
 
     <div id="informesExportWrap" style="display:none;gap:8px">
-      <button class="btn bor bs" style="flex:1" onclick="exportInformeCSV()">⬇ CSV</button>
+      <button class="btn bor bs" id="btnInformeCSV" style="flex:1" onclick="exportInformeCSV()">⬇ CSV</button>
       <button class="btn bor bs" style="flex:1" onclick="exportInformePDF()">⬇ PDF</button>
     </div>
   </div>
@@ -933,7 +934,8 @@
         <summary>Historial, Informes y exportar</summary>
         <ul class="help-list">
           <li><b>Historial</b>: busca por texto, filtra por fechas, conductor, irradiador o estado, y exporta lo que estás viendo (CSV, Excel, PDF).</li>
-          <li><b>Informes</b>: elige el tipo (registros, fichajes, o conducción — viajes/repostajes), los campos (con <b>Σ suma</b> para totales), el periodo y, si quieres, un <b>filtro</b> (usuario en fichajes; conductor, usuario o irradiador en registros; vehículo o usuario en viajes/repostajes — los totales solo suman lo filtrado). En viajes, la Σ de «Km recorridos» da el total de kilómetros del periodo; en repostajes, la Σ de «Importe» da el gasto total. Revisa la vista previa antes de exportar. Las duraciones (horas de más, duración de la irradiación) se muestran en formato <b>h:mm</b>, por ejemplo 0:30.</li>
+          <li><b>Informes</b>: elige el tipo (registros, fichajes, o conducción — viajes/repostajes), los campos (con <b>Σ suma</b> para totales), el periodo y, si quieres, un <b>filtro</b> (usuario en fichajes; conductor, usuario o irradiador en registros; vehículo o usuario en viajes/repostajes — los totales solo suman lo filtrado). En viajes, la Σ de «Km recorridos» da el total de kilómetros del periodo; en repostajes, la Σ de «Importe» da el gasto total. Revisa la vista previa antes de exportar.</li>
+        <li><b>Anuario</b>: la misma pantalla de Informes, con el periodo fijado al año completo y un diseño propio (colores por bloque, logos y firma) pensado para presentar a dirección. Se exporta solo en PDF. Las duraciones (horas de más, duración de la irradiación) se muestran en formato <b>h:mm</b>, por ejemplo 0:30.</li>
         </ul>
       </details>
       <details class="help-det">

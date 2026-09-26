@@ -136,6 +136,25 @@ es lo de debajo — y unas pocas cosas que se ven.
   nombre del archivo incluye el filtro (`informe_fichajes_ana_….pdf`,
   `informe_viajes_1234-abc_….pdf`) y la cabecera del PDF muestra el periodo
   y el filtro aplicado. «Quitar filtros» vuelve a mostrar todo.
+- **Informe «Anuario» (diseño profesional para dirección).** Un quinto tipo
+  de informe, sobre el mismo bloque de datos que «Registros» (mismos campos,
+  mismos filtros de conductor/usuario/irradiador): el usuario elige qué
+  campos incluir exactamente igual que hasta ahora. Al elegirlo, el periodo
+  se fija al año en curso (se puede acortar a mano si hace falta) y la
+  exportación queda solo en PDF, con un diseño propio calcado de la
+  plantilla Excel del proyecto (`Plantilla_anuario_.xlsx`):
+  - Cabecera en caja con el logo del proyecto y el de GrupoTragsa, título,
+    subtítulo, periodo y nº de registros.
+  - Los campos se agrupan por bloque (Transporte / Temperatura /
+    Irradiación) con el mismo color de fondo que la plantilla, de arriba a
+    abajo, y un separador más marcado entre bloques.
+  - Fila de totales (Σ) resaltada, igual que en el resto de informes.
+  - Firma para la dirección («Fdo.: ______ / Dirección») al final del
+    informe.
+  - El símbolo «µ» se sustituye por «u» solo dentro del PDF: en algunos
+    lectores (comprobado con `pdftotext`/poppler) la fuente estándar de
+    jsPDF no lo dibuja y deja un hueco en blanco; el CSV y la propia app
+    siguen mostrando «µ» sin cambios.
 - **Corrección**: `listarViajes`/`listarRepostajes` se quedaban siempre en
   las últimas 500 filas, sin avisar — un informe de kilómetros o de gasto
   de un periodo con más de 500 viajes o repostajes habría dado un total
@@ -163,7 +182,7 @@ es lo de debajo — y unas pocas cosas que se ven.
   todas las pantallas, XSS, sesión, sin conexión, exportaciones, CSP—:
   `npm i --no-save playwright && npx playwright install chromium` y luego
   `node --import ./tests/helpers/register.mjs tests/e2e/smoke.e2e.mjs`
-  (también `features.e2e.mjs`, `extras.e2e.mjs`, `informes.e2e.mjs` y `xss.e2e.mjs`). Ninguna necesita Supabase.
+  (también `features.e2e.mjs`, `extras.e2e.mjs`, `informes.e2e.mjs`, `anuario.e2e.mjs` y `xss.e2e.mjs`; `anuario.e2e.mjs` necesita además `pdftotext`/`pdfinfo` — del paquete `poppler-utils` — para leer el PDF generado). Ninguna necesita Supabase.
 - `npm run check` comprueba la sintaxis de todo.
 
 ### Limitaciones conocidas / siguientes pasos recomendados
@@ -338,7 +357,8 @@ api/_lib/             → http.js (envoltorio común), auth.js (sesión),
 supabase/schema.sql   → esquema completo (re-ejecutable)
 vendor/               → Chart.js, SheetJS y jsPDF (con sus licencias)
 fonts/                → Manrope, Inter e IBM Plex Mono (licencia OFL)
-img/                  → logos e iconos (optimizados)
+img/                  → logos e iconos (optimizados); grupo-tragsa-logo.png viene de la
+                        plantilla Excel del anuario (Plantilla_anuario_.xlsx), para el PDF del anuario
 tests/                → pruebas de la API (npm test) y de navegador (e2e/)
 package.json          → dependencias de las funciones de Vercel
 vercel.json           → cabeceras de seguridad, CSP y caché
