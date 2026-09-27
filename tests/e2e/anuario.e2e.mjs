@@ -98,6 +98,39 @@ check("El PDF no lleva los datos del conductor filtrado antes (Ana) fuera de la 
 const pageCount = execFileSync("pdfinfo", [pdfPath], { encoding: "utf8" }).match(/Pages:\s*(\d+)/)[1];
 check("El PDF tiene páginas", Number(pageCount) >= 1, pageCount);
 
+// ═════════ Anuario — Ficha por registro (formulario TRAGSA en tarjetas) ═════════
+await ev(() => go("informes")); await w(500);
+const opciones2 = await ev(() => [...document.getElementById("informeTipo").options].map((o) => o.value));
+check("El selector incluye también «anuarioFicha», junto a «anuario»", opciones2.includes("anuarioFicha") && opciones2.includes("anuario"), opciones2.join(","));
+
+await page.selectOption("#informeTipo", "anuarioFicha"); await w(500);
+const periodoFicha = await ev(() => [document.getElementById("iDesde").value, document.getElementById("iHasta").value]);
+check("La ficha también fija el periodo al año completo", periodoFicha[0] === `${anio}-01-01` && periodoFicha[1] === `${anio}-12-31`, periodoFicha.join(" – "));
+check("El botón CSV también se oculta en la ficha", (await ev(() => getComputedStyle(document.getElementById("btnInformeCSV")).display)) === "none");
+
+await ev((ids) => {
+  document.querySelectorAll(".campoInformeChk").forEach((c) => { c.checked = ids.includes(c.value); });
+  actualizarResumenCampos();
+}, ["fecha", "semana", "conductor", "irradiador", "nUrnas", "duracionIrr", "expUsv"]);
+await ev(() => buscarInformes()); await w(900);
+check("Trae solo los registros del año en curso, igual que la tabla", (await ev(() => S.informesRaw.length)) === 2, String(await ev(() => S.informesRaw.length)));
+
+const descargaFicha = page.waitForEvent("download");
+await ev(() => exportInformePDF());
+const dlFicha = await descargaFicha;
+const pdfPathFicha = "/tmp/anuario_ficha_check.pdf";
+fs.copyFileSync(await dlFicha.path(), pdfPathFicha);
+check("El nombre del archivo es el de la ficha (distinto del de la tabla)", dlFicha.suggestedFilename().startsWith("informe_anuario-ficha_"), dlFicha.suggestedFilename());
+
+const textoFicha = execFileSync("pdftotext", ["-layout", pdfPathFicha, "-"], { encoding: "utf8" });
+check("Cabecera: mismo título y proyecto que la tabla", textoFicha.includes("TRAGSA-Proyecto piloto TIE Aedes albopictus") && textoFicha.includes("Sexado, dosificación, transporte e irradiación"));
+check("Cabecera: indica que es la ficha por registro", textoFicha.includes(`Informe anuario (ficha por registro) — ${anio}`));
+check("Una tarjeta por registro, numeradas con su fecha", textoFicha.includes("Registro 1 —") && textoFicha.includes("Registro 2 —"));
+check("Barras de bloque: IDENTIFICACIÓN / TRANSPORTE / IRRADIACIÓN", textoFicha.includes("IDENTIFICACIÓN") && textoFicha.includes("TRANSPORTE") && textoFicha.includes("IRRADIACIÓN"));
+check("El símbolo µ también se sustituye por «u» aquí", textoFicha.includes("(uSv)") && !textoFicha.includes("µ"));
+check("Firma para dirección al final", textoFicha.includes("Fdo.:") && textoFicha.includes("Dirección"));
+check("Aparecen los dos conductores (sin filtro)", textoFicha.includes("Ana López") && textoFicha.includes("Bob Ruiz"));
+
 check("Sin errores de JavaScript", errores.length === 0, errores.slice(0, 3).join(" | "));
 await browser.close(); srv.close();
 console.log(fallos ? `\n${fallos} comprobación(es) fallida(s)` : "\nTodas las comprobaciones correctas");

@@ -2323,7 +2323,9 @@ function camposInformeCatalogo() {
   if(S.informesTipo==='repostajes') return CAMPOS_INFORME_REPOSTAJES;
   return CAMPOS_INFORME;                 // 'registros' y 'anuario' comparten el mismo catálogo (bloque de irradiación)
 }
-function esInformeAnuario() { return S.informesTipo==='anuario'; }
+function esInformeAnuarioTabla() { return S.informesTipo==='anuario'; }
+function esInformeAnuarioFicha() { return S.informesTipo==='anuarioFicha'; }
+function esAlgunAnuario() { return esInformeAnuarioTabla()||esInformeAnuarioFicha(); }
 function esInformeConduccion() { return S.informesTipo==='viajes'||S.informesTipo==='repostajes'; }
 function cambiarTipoInforme() {
   S.informesTipo=document.getElementById('informeTipo').value;
@@ -2333,18 +2335,18 @@ function cambiarTipoInforme() {
   renderCamposInforme();
   iniciarFiltrosInforme();
   // El anuario es, por definición, del año completo — pero se puede acortar a mano si hace falta.
-  if(esInformeAnuario()){
+  if(esAlgunAnuario()){
     const anio=new Date().getFullYear();
     document.getElementById('iDesde').value=`${anio}-01-01`;
     document.getElementById('iHasta').value=`${anio}-12-31`;
   }
   actualizarBotonesExportInforme();
 }
-// El anuario tiene un diseño propio (colores, logos, firma) pensado para imprimir/presentar:
-// no tiene sentido en CSV, así que ese botón se oculta y solo queda el de PDF.
+// Los dos anuarios tienen un diseño propio (colores, logos, firma) pensado para imprimir/presentar:
+// no tienen sentido en CSV, así que ese botón se oculta y solo queda el de PDF.
 function actualizarBotonesExportInforme() {
   const btnCsv=document.getElementById('btnInformeCSV');
-  if(btnCsv) btnCsv.style.display=esInformeAnuario()?'none':'';
+  if(btnCsv) btnCsv.style.display=esAlgunAnuario()?'none':'';
 }
 
 // ── Filtros de Informes ───────────────────────────────
@@ -2486,7 +2488,8 @@ function limpiarFiltrosInforme() {
 // Nombre del archivo exportado: incluye el filtro elegido (p. ej. informe_fichajes_ana_20260920.pdf)
 function nombreArchivoInforme(ext) {
   const f=valoresFiltrosInforme();
-  const tipoArchivo=S.informesTipo==='fichajes'?'fichajes':S.informesTipo==='viajes'?'viajes':S.informesTipo==='repostajes'?'repostajes':S.informesTipo==='anuario'?'anuario':'registros';
+  const NOMBRES_TIPO={ fichajes:'fichajes', viajes:'viajes', repostajes:'repostajes', anuario:'anuario', anuarioFicha:'anuario-ficha' };
+  const tipoArchivo=NOMBRES_TIPO[S.informesTipo]||'registros';
   const partes=S.informesTipo==='fichajes'?[f.usuarioFich]:esInformeConduccion()?[f.vehiculo,f.usuarioCond]:[f.conductor,f.usuario,f.irradiador];
   const slug=partes.filter(Boolean).map(x=>String(x).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')).filter(Boolean).join('_').slice(0,50);
   return `informe_${tipoArchivo}${slug?'_'+slug:''}_${dateStamp()}.${ext}`;
@@ -2668,7 +2671,8 @@ async function exportInformeCSV() {
   showSaveDlg(filename,'csv',new Blob(['\uFEFF'+content]).size,'informes',result);
 }
 async function exportInformePDF() {
-  if(esInformeAnuario()) return exportInformeAnuarioPDF();
+  if(esInformeAnuarioTabla()) return exportInformeAnuarioPDF();
+  if(esInformeAnuarioFicha()) return exportInformeAnuarioFichaPDF();
   const regs=S.informesRaw||[];
   if(!regs.length){toast('Busca primero un periodo con registros');return;}
   const campos=camposInformeSeleccionados();
@@ -2772,7 +2776,7 @@ async function exportInformeAnuarioPDF() {
   if(logoMosquito){ const w=42, h=w*(logoMosquito.h/logoMosquito.w); doc.addImage(logoMosquito.dataURL,'PNG', M+10, boxTop+(boxH-h)/2, w, h); }
   const txtX=M+62;
   doc.setFont('helvetica','bold'); doc.setFontSize(14); doc.setTextColor(20);
-  doc.text('TRAGSA-Proyecto piloto TIE Aedes albopictus', txtX, boxTop+22);
+  doc.text('TRAGSA-Proyecto TIE Aedes albopictus', txtX, boxTop+22);
   doc.setFontSize(10.5);
   doc.text('Sexado, dosificación, transporte e irradiación', txtX, boxTop+37);
   doc.setTextColor(76,110,245); doc.setFontSize(11);
@@ -2840,6 +2844,145 @@ async function exportInformeAnuarioPDF() {
   doc.text('Fdo.:', firmaX, firmaY+14);
   doc.setFontSize(8); doc.setTextColor(120);
   doc.text('Dirección', firmaX, firmaY+26);
+  doc.setTextColor(20);
+
+  const blob=doc.output('blob');
+  const filename=nombreArchivoInforme('pdf');
+  const result=await dlBlob(filename,blob);
+  if(result===null) return;
+  showSaveDlg(filename,'pdf',blob.size,'informes',result);
+}
+
+// ── INFORME ANUARIO — FICHA POR REGISTRO (formulario semanal en papel del proyecto) ──
+// Sigue la otra plantilla del proyecto: una tarjeta por registro, con una barra gris por cada
+// bloque de campos (igual que "Urnas/tubos", "Transporte", "Irradiación" en su formulario de
+// papel), en vez de una fila de tabla. Usa los mismos campos y el mismo selector que el resto de
+// informes — solo cambia cómo se presentan.
+const GRIS_SECCION_FICHA=[191,191,191];
+// Agrupa los campos SELECCIONADOS por su 'grupo', conservando el orden del catálogo (Identificación,
+// Transporte, Temperatura, Irradiación, Urnas, Observaciones) — así cada bloque sale una sola vez.
+function bloquesDeCampos(campos) {
+  const orden=[]; const porGrupo=new Map();
+  campos.forEach(c=>{ const g=c.grupo||'Otros'; if(!porGrupo.has(g)){ porGrupo.set(g,[]); orden.push(g); } porGrupo.get(g).push(c); });
+  return orden.map(g=>({ grupo:g, campos:porGrupo.get(g) }));
+}
+async function exportInformeAnuarioFichaPDF() {
+  const regs=S.informesRaw||[];
+  if(!regs.length){toast('Busca primero un periodo con registros');return;}
+  const campos=camposInformeSeleccionados();
+  if(!campos.length){toast('Selecciona al menos un campo para el informe');return;}
+  if(!window.jspdf){ try{ await cargarLib('pdf'); }catch{ toast('⚠ No se pudo cargar la librería de PDF (revisa tu conexión a internet)'); return; } }
+
+  const bloques=bloquesDeCampos(campos);
+  const { jsPDF }=window.jspdf;
+  const doc=new jsPDF({ orientation:'portrait', unit:'pt', compress:true });
+  const [logoMosquito, logoTragsa]=await Promise.all([
+    cargarLogoInforme('img/mosquito_logo_team.png'),
+    cargarLogoInforme('img/grupo-tragsa-logo.png'),
+  ]);
+  const per=S.informesPeriodo||{};
+  const mismoAnio = per.desde && per.hasta && per.desde.slice(0,4)===per.hasta.slice(0,4);
+  const tituloPeriodo = mismoAnio ? per.desde.slice(0,4) : `${per.desde?fmt(pd(per.desde)):'…'} – ${per.hasta?fmt(pd(per.hasta)):'…'}`;
+  const filtro=descripcionFiltrosInforme();
+
+  const M=36;
+  const pageW=doc.internal.pageSize.getWidth(), pageH=doc.internal.pageSize.getHeight();
+  const boxW=pageW-M*2;
+
+  // Cabecera completa (con cajas y logos) en la primera página; en el resto, una línea sola —
+  // así no se repite media página de letrero en cada hoja con muchas fichas.
+  function dibujarCabecera(completa) {
+    let y=M;
+    if(completa){
+      const boxH=72;
+      doc.setDrawColor(30); doc.setLineWidth(1.1); doc.rect(M,y,boxW,boxH);
+      const divX=M+boxW*0.67; doc.line(divX,y,divX,y+boxH);
+      if(logoMosquito){ const w=36,h=w*(logoMosquito.h/logoMosquito.w); doc.addImage(logoMosquito.dataURL,'PNG',M+8,y+(boxH-h)/2,w,h); }
+      const txtX=M+50;
+      doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(20);
+      doc.text('TRAGSA-Proyecto TIE Aedes albopictus', txtX, y+20);
+      doc.setFontSize(9.5);
+      doc.text('Sexado, dosificación, transporte e irradiación', txtX, y+34);
+      doc.setTextColor(76,110,245); doc.setFontSize(10);
+      doc.text(`Informe anuario (ficha por registro) — ${tituloPeriodo}`, txtX, y+50);
+      doc.setTextColor(20); doc.setFont('helvetica','normal');
+      doc.setFontSize(8);
+      doc.text('Periodo:', divX+8, y+16);
+      doc.text(`${per.desde?fmt(pd(per.desde)):'…'} – ${per.hasta?fmt(pd(per.hasta)):'…'}`, divX+48, y+16);
+      doc.text('Registros:', divX+8, y+28);
+      doc.text(String(regs.length), divX+48, y+28);
+      if(filtro){ doc.setFontSize(7); doc.text(doc.splitTextToSize(filtro, boxW-(divX-M)-60), divX+8, y+40); doc.setFontSize(8); }
+      if(logoTragsa){ const w=58,h=w*(logoTragsa.h/logoTragsa.w); doc.addImage(logoTragsa.dataURL,'PNG', M+boxW-w-8, y+boxH-h-6, w, h); }
+      y+=boxH+10;
+      doc.setFontSize(6.5); doc.setTextColor(140);
+      doc.text(`Generado: ${new Date().toLocaleString()}`, M, y);
+      doc.setTextColor(20);
+      y+=10;
+    } else {
+      doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(20);
+      doc.text(`TRAGSA · Informe anuario (ficha) — ${tituloPeriodo}`, M, y+8);
+      doc.setFont('helvetica','normal');
+      y+=16;
+    }
+    return y;
+  }
+  function piePagina(numero) {
+    doc.setFontSize(7.5); doc.setTextColor(130);
+    doc.text(`Página ${numero}`, pageW-M, pageH-14, { align:'right' });
+    doc.setTextColor(20);
+  }
+
+  let cursorY=dibujarCabecera(true);
+  let pagina=1; piePagina(pagina);
+
+  regs.forEach((r,idx)=>{
+    // Alto estimado con margen de sobra (cada bloque puede ocupar 2 líneas si el texto es largo);
+    // sirve para saltar de página ANTES de empezar la ficha, no a mitad — cada mini-tabla lleva
+    // además su propio "pageBreak:avoid" por si el cálculo se queda corto.
+    const altoEstimado=18+bloques.reduce((acc)=>acc+48,0);
+    if(cursorY+altoEstimado>pageH-70){
+      doc.addPage(); pagina++; cursorY=dibujarCabecera(false); piePagina(pagina);
+    }
+    doc.setFontSize(8); doc.setTextColor(110);
+    doc.text(`Registro ${idx+1}${r.fecha_irradiacion?' — '+fmt(pd(r.fecha_irradiacion)):''}`, M, cursorY);
+    doc.setTextColor(20);
+    let y=cursorY+8;
+    bloques.forEach(bl=>{
+      const etiquetas=bl.campos.map(c=>textoSeguroPDF(c.label));
+      const valores=bl.campos.map(c=>c.get(r));
+      doc.autoTable({
+        startY:y, margin:{ left:M, right:M }, tableWidth:boxW, pageBreak:'avoid',
+        head:[
+          [{ content:bl.grupo.toUpperCase(), colSpan:etiquetas.length, styles:{ fillColor:GRIS_SECCION_FICHA, textColor:20, fontStyle:'bold', halign:'center' } }],
+          etiquetas,
+        ],
+        body:[valores],
+        styles:{ fontSize:7, cellPadding:3, lineColor:[120,120,120], lineWidth:0.5, halign:'center' },
+        // fillColor blanco por defecto: si no, la 2ª fila de cabecera (los nombres de campo) hereda
+        // el color de cabecera del tema (un turquesa) en vez de quedar en blanco como la plantilla.
+        headStyles:{ textColor:20, fontStyle:'bold', lineColor:[80,80,80], lineWidth:0.5, fillColor:[255,255,255] },
+        theme:'grid',
+      });
+      y=doc.lastAutoTable.finalY+4;
+    });
+    cursorY=y+14;
+    if(idx<regs.length-1){
+      doc.setDrawColor(200); doc.setLineWidth(0.6);
+      doc.line(M, cursorY-8, M+boxW, cursorY-8);
+      doc.setDrawColor(20);
+    }
+  });
+
+  // Firma de dirección, siempre al final del informe (nueva página si no cabe).
+  let firmaY=cursorY+40;
+  if(firmaY>pageH-50){ doc.addPage(); pagina++; dibujarCabecera(false); piePagina(pagina); firmaY=70; }
+  doc.setDrawColor(20); doc.setLineWidth(0.8);
+  const firmaX=M+boxW-160;
+  doc.line(firmaX, firmaY, firmaX+160, firmaY);
+  doc.setFontSize(9); doc.setTextColor(20);
+  doc.text('Fdo.:', firmaX, firmaY+13);
+  doc.setFontSize(8); doc.setTextColor(120);
+  doc.text('Dirección', firmaX, firmaY+24);
   doc.setTextColor(20);
 
   const blob=doc.output('blob');
