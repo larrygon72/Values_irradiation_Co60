@@ -2755,7 +2755,7 @@ async function exportInformeAnuarioPDF() {
   const { jsPDF }=window.jspdf;
   const doc=new jsPDF({ orientation:'landscape', unit:'pt', compress:true });
   const [logoMosquito, logoTragsa]=await Promise.all([
-    cargarLogoInforme('img/mosquito_logo_team.png'),
+    cargarLogoInforme('img/logo-tie-mosquito.png'),
     cargarLogoInforme('img/grupo-tragsa-logo.png'),
   ]);
 
