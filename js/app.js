@@ -2466,6 +2466,21 @@ function filtrarSegunTipoInforme(items) {
   if(esInformeConduccion()) return filtrarConduccionInforme(items);
   return filtrarRegistrosInforme(items);
 }
+// Los informes se leen de más antiguo a más reciente (orden cronológico). La API devuelve lo último
+// primero (así lo necesitan el Historial y las listas rápidas), por eso se reordena aquí, una sola
+// vez, antes de filtrar/previsualizar/exportar: vista previa, CSV y PDF salen en el mismo orden.
+// Mismo día: por usuario (fichajes) y luego por hora de guardado; sin fecha, al final.
+function ordenarInformeAscendente(items) {
+  const dia=r=>r.fecha_irradiacion||r.fecha||'';
+  return [...(items||[])].sort((a,b)=>{
+    const fa=dia(a), fb=dia(b);
+    if(fa!==fb){ if(!fa) return 1; if(!fb) return -1; return fa<fb?-1:1; }
+    const ua=String(a.usuario_nick||''), ub=String(b.usuario_nick||'');
+    if(ua!==ub) return ua.localeCompare(ub,'es');
+    const ca=a.created_at||'', cb=b.created_at||'';
+    return ca<cb?-1:ca>cb?1:0;
+  });
+}
 function actualizarResultadoInforme() {
   const note=document.getElementById('informesNote');
   const n=S.informesRaw.length, f=descripcionFiltrosInforme();
@@ -2634,6 +2649,7 @@ async function buscarInformes() {
       items=data.registros||[]; S.informesTruncado=!!data.truncado;
     }
     setCloudState('ok');
+    items=ordenarInformeAscendente(items);
     S.informesTodo=items; S.informesBuscado=true; S.informesPeriodo={desde,hasta};
     poblarFiltrosInforme(items);
     S.informesRaw=filtrarSegunTipoInforme(items);
@@ -2767,10 +2783,7 @@ async function exportInformeAnuarioPDF() {
       if(logoMosquito){ const w=36,h=w*(logoMosquito.h/logoMosquito.w); doc.addImage(logoMosquito.dataURL,'PNG',M+8,y+(boxH-h)/2,w,h); }
       const txtX=M+50;
       doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(20);
-
-      // ******************************** TEXTO DE CABECERA DEL INFORME ANUARIO ********************************* —
-      
-      doc.text('TRAGSA-Proyecto TIE Aedes albopictus', txtX, y+22); 
+      doc.text('TRAGSA-Proyecto piloto TIE Aedes albopictus', txtX, y+22);
       doc.setFontSize(9.5); doc.setFont('helvetica','normal');
       doc.text('Sexado, dosificación, transporte e irradiación', txtX, y+38);
       doc.setFontSize(8);

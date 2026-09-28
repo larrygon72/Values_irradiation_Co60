@@ -96,6 +96,7 @@ check("Cabecera: subtítulo", texto.includes("Sexado, dosificación, transporte 
 check("Cabecera: periodo y nº de registros", /Periodo:\s*01\/01\/\d{4}\s*–\s*31\/12\/\d{4}/.test(texto) && /Registros:\s*2/.test(texto));
 check("Ya NO aparece el rótulo «Informe anuario» en ningún sitio del PDF", !texto.includes("Informe anuario"));
 check("Cada tarjeta lleva solo su fecha, sin la palabra «Registro»", (texto.includes("10/01/") || texto.includes(`10/01/${anio}`)) && !/Registro\s+\d/.test(texto), texto.split("\n").find((l) => /\d{2}\/\d{2}\/\d{4}/.test(l)));
+check("Las tarjetas salen en orden cronológico: enero antes que junio", texto.indexOf(`10/01/${anio}`) !== -1 && texto.indexOf(`10/01/${anio}`) < texto.indexOf(`15/06/${anio}`));
 check("Barras de bloque por tarjeta: IDENTIFICACIÓN / TRANSPORTE / IRRADIACIÓN", texto.includes("IDENTIFICACIÓN") && texto.includes("TRANSPORTE") && texto.includes("IRRADIACIÓN"));
 check("El símbolo µ se sustituye por una «u» segura para PDF (evita el hueco en blanco de algunos lectores)", texto.includes("(uSv)") && !texto.includes("µ"));
 check("Firma para dirección al final del informe", texto.includes("Fdo.:") && texto.includes("Dirección"));

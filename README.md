@@ -156,6 +156,14 @@ es lo de debajo — y unas pocas cosas que se ven.
     lectores (comprobado con `pdftotext`/poppler) la fuente estándar de
     jsPDF no lo dibuja y deja un hueco en blanco; el CSV y la propia app
     siguen mostrando «µ» sin cambios.
+- **Orden de los informes: cronológico ascendente** (de más antiguo a más
+  reciente) en todos los tipos —registros, fichajes, viajes, repostajes y
+  anuario—, en la vista previa, el CSV y el PDF. Se reordena en el
+  navegador al buscar (la API sigue devolviendo lo último primero, que es
+  lo que necesitan el Historial y las listas rápidas). Mismo día: por
+  usuario y luego por hora de guardado; sin fecha, al final. El
+  Historial mantiene su propio orden, que se cambia pulsando las
+  cabeceras de columna.
 - **Corrección**: `listarViajes`/`listarRepostajes` se quedaban siempre en
   las últimas 500 filas, sin avisar — un informe de kilómetros o de gasto
   de un periodo con más de 500 viajes o repostajes habría dado un total

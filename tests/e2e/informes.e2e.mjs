@@ -171,6 +171,41 @@ await cerrarDialogo();
 await ev(() => limpiarFiltrosInforme()); await w(300);
 check("«Quitar filtros» en repostajes vuelve a los 3 / 120 €", (await filas()) === 3 && /120\.00/.test(await pie()));
 
+// ═════════ Orden cronológico ascendente (más antiguo primero) ═════════
+const datosGuardados = { registros: db.tables.registros, fichajes: db.tables.fichajes, vehiculo_viajes: db.tables.vehiculo_viajes, repostajes: db.tables.repostajes }; // se restauran al terminar este bloque
+const fechasPreview = () => ev(() => [...document.querySelectorAll("#vistaPreviaTabla tbody tr")].map((r) => r.querySelector("td").innerText.trim()));
+const esAscendente = (fs) => fs.every((f, i) => i === 0 || fs[i - 1].split("/").reverse().join("") <= f.split("/").reverse().join(""));
+db.tables.registros = [
+  { id: crypto.randomUUID(), created_at: AHORA, fecha_irradiacion: dia(1), semana_iso: 38, creado_por: "ana", conductor_nick: "ana", conductor_nombre: "Ana", n_urnas: 1 },
+  { id: crypto.randomUUID(), created_at: AHORA, fecha_irradiacion: dia(9), semana_iso: 37, creado_por: "ana", conductor_nick: "ana", conductor_nombre: "Ana", n_urnas: 1 },
+  { id: crypto.randomUUID(), created_at: AHORA, fecha_irradiacion: dia(5), semana_iso: 37, creado_por: "ana", conductor_nick: "ana", conductor_nombre: "Ana", n_urnas: 1 },
+];
+db.tables.fichajes = [fich("bob", 1, 0.5), fich("bob", 8, 0.5), fich("ana", 4, 0.5), fich("ana", 8, 0.5)];
+db.tables.vehiculo_viajes = [1, 7, 3].map((a) => viaje({ fecha: dia(a), matricula: "1234 ABC", vehiculo_id: veh1.id, km_inicial: 0, km_final: 1, km_recorridos: 1, creado_por: "ana" }));
+db.tables.repostajes = [2, 9, 4].map((a) => repo({ fecha: dia(a), matricula: "1234 ABC", vehiculo_id: veh1.id, km: 1, importe: 1, precio_litro: 1, litros: 1, tipo_combustible: "diesel", creado_por: "ana" }));
+for (const tipo of ["registros", "anuario", "fichajes", "viajes", "repostajes"]) {
+  await ev(() => go("informes")); await w(400);
+  await page.selectOption("#informeTipo", tipo); await w(400);
+  await ev(() => { document.getElementById("iDesde").value = "2000-01-01"; document.getElementById("iHasta").value = "2100-12-31"; });
+  await ev(() => buscarInformes()); await w(900);
+  const fs = await fechasPreview();
+  check(`Informe «${tipo}»: la vista previa sale de más antiguo a más reciente`, fs.length >= 3 && esAscendente(fs), fs.join(" → "));
+}
+// Mismo día en fichajes: por usuario (ana antes que bob)
+await ev(() => go("informes")); await w(400);
+await page.selectOption("#informeTipo", "fichajes"); await w(400);
+await ev(() => { document.getElementById("iDesde").value = "2000-01-01"; document.getElementById("iHasta").value = "2100-12-31"; });
+await ev(() => buscarInformes()); await w(900);
+const usuariosEnOrden = await ev(() => S.informesRaw.filter((f) => f.fecha === S.informesRaw[0].fecha).map((f) => f.usuario_nick));
+check("Fichajes del mismo día: ordenados por usuario (ana, bob)", usuariosEnOrden.join(",") === "ana,bob", usuariosEnOrden.join(","));
+await page.selectOption("#informeTipo", "registros"); await w(300);
+await ev(() => buscarInformes()); await w(900);
+const csvOrden = await descargar(() => exportInformeCSV());
+const fechasCsv = csvOrden.texto.toString().split(/\r?\n/).slice(1).map((l) => (l.match(/^"(\d{2}\/\d{2}\/\d{4})"/) || [])[1]).filter(Boolean);
+check("El CSV también sale en orden ascendente", fechasCsv.length === 3 && esAscendente(fechasCsv), fechasCsv.join(" → "));
+await cerrarDialogo();
+Object.assign(db.tables, datosGuardados);
+
 // ═════════ Usuario normal ═════════
 await ev(() => logout()); await entrar("ana");
 await ev(() => go("informes")); await w(800);
