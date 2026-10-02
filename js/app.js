@@ -2799,7 +2799,7 @@ async function exportInformeAnuarioPDF() {
       const divX=M+boxW*0.70; doc.line(divX,y,divX,y+boxH);
       // Logo a tamaño de impresión (antes 36pt — se perdía en papel): se calcula su ancho y el del
       // título a partir de él, así nunca se pisan aunque cambie el tamaño del logo más adelante.
-      const logoW=56;
+      const logoW=72;
       if(logoMosquito){ const h=logoW*(logoMosquito.h/logoMosquito.w); doc.addImage(logoMosquito.dataURL,'PNG',M+8,y+(boxH-h)/2,logoW,h); }
       const txtX=M+8+logoW+14;
       doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(20);
