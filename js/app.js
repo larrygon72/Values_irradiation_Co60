@@ -2803,7 +2803,7 @@ async function exportInformeAnuarioPDF() {
       if(logoMosquito){ const h=logoW*(logoMosquito.h/logoMosquito.w); doc.addImage(logoMosquito.dataURL,'PNG',M+8,y+(boxH-h)/2,logoW,h); }
       const txtX=M+8+logoW+14;
       doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(20);
-      doc.text('TRAGSA-Obra: 0734346 TIE Aedes albopictus', txtX, y+22);
+      doc.text('TRAGSA-TIE Aedes albopictus. Obra: 0734346 ', txtX, y+22);
       doc.setFontSize(9.5); doc.setFont('helvetica','normal');
       doc.text('Sexado, dosificación, transporte e irradiación', txtX, y+38);
       doc.setFontSize(8);
