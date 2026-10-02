@@ -89,7 +89,7 @@ const S = {
   md:[0,0,0,0,0,0],
   exCtx:'form',
   histVista:'lista', histRaw:[], histFiltered:[],
-  informesRaw:[], informesTipo:'registros', informesTodo:[], informesBuscado:false, informesPeriodo:null,
+  informesRaw:[], informesTipo:'registros', informesTodo:[], informesBuscado:false, informesPeriodo:null, informeOrientacion:null,
   histSort:{campo:'fecha_irradiacion',dir:'desc'},
   editingId:null, detRegistro:null,
   dashRegs:[],
@@ -658,10 +658,11 @@ function go(id) {
     const iso=tod;
     document.getElementById('iDesde').value=iso(hace30);
     document.getElementById('iHasta').value=iso(hoy);
-    S.informesRaw=[]; S.informesTodo=[]; S.informesBuscado=false; S.informesPeriodo=null;
+    S.informesRaw=[]; S.informesTodo=[]; S.informesBuscado=false; S.informesPeriodo=null; S.informeOrientacion=null;
     document.getElementById('informesNote').textContent='';
     ocultarVistaPreviaInforme();
     iniciarFiltrosInforme();
+    actualizarBotonesOrientacionInforme();
   }
   if(id==='form')       { populateConductorSelect(); refreshDrivers().then(populateConductorSelect); populateIrradiadorSelect(); refreshIrradiadores().then(populateIrradiadorSelect); renderUrnaCards(); updateStepperStatus(); }
   if(id==='irradiadores') renderIrradiadoresScreen();
@@ -2203,7 +2204,7 @@ function cargarLogoInforme(ruta) {
 // informe no salte de sitio según haya o no haya conexión. Devuelve dónde
 // puede empezar el contenido (tablaY) para que nada se solape.
 function dibujarCabeceraPDF(doc, logo, titulo, detalle) {
-  const logoX=40, logoY=14, logoW=64;
+  const logoX=40, logoY=14, logoW=84;   // más grande para que se vea bien impreso en papel
   const logoH = logo ? logoW*(logo.h/logo.w) : logoW*(2/3);
   if (logo) doc.addImage(logo.dataURL,'PNG',logoX,logoY,logoW,logoH);
   doc.setFontSize(6.5); doc.setTextColor(140);
@@ -2324,10 +2325,25 @@ function camposInformeCatalogo() {
   return CAMPOS_INFORME;                 // 'registros' y 'anuario' comparten el mismo catálogo (bloque de irradiación)
 }
 function esInformeAnuario() { return S.informesTipo==='anuario'; }
+// Orientación del PDF: por defecto vertical en el Anuario (para que quepa bien impreso en una
+// hoja normal) y horizontal en el resto (tablas con más columnas) — el usuario puede cambiarla a
+// mano con los botones de la pantalla; la elección se olvida al cambiar de tipo de informe.
+function orientacionInformePorDefecto() { return esInformeAnuario()?'portrait':'landscape'; }
+function orientacionInformeActual() { return S.informeOrientacion||orientacionInformePorDefecto(); }
+function elegirOrientacionInforme(o) {
+  S.informeOrientacion=o;
+  actualizarBotonesOrientacionInforme();
+}
+function actualizarBotonesOrientacionInforme() {
+  const actual=orientacionInformeActual();
+  const vb=document.getElementById('btnOrientVertical'), hb=document.getElementById('btnOrientHorizontal');
+  if(vb){ vb.classList.toggle('bp',actual==='portrait'); vb.classList.toggle('bo',actual!=='portrait'); }
+  if(hb){ hb.classList.toggle('bp',actual==='landscape'); hb.classList.toggle('bo',actual!=='landscape'); }
+}
 function esInformeConduccion() { return S.informesTipo==='viajes'||S.informesTipo==='repostajes'; }
 function cambiarTipoInforme() {
   S.informesTipo=document.getElementById('informeTipo').value;
-  S.informesRaw=[]; S.informesTodo=[]; S.informesBuscado=false; S.informesPeriodo=null;
+  S.informesRaw=[]; S.informesTodo=[]; S.informesBuscado=false; S.informesPeriodo=null; S.informeOrientacion=null;
   document.getElementById('informesNote').textContent='';
   ocultarVistaPreviaInforme();
   renderCamposInforme();
@@ -2338,6 +2354,7 @@ function cambiarTipoInforme() {
     document.getElementById('iDesde').value=`${anio}-01-01`;
     document.getElementById('iHasta').value=`${anio}-12-31`;
   }
+  actualizarBotonesOrientacionInforme();
   actualizarBotonesExportInforme();
 }
 // Los dos anuarios tienen un diseño propio (colores, logos, firma) pensado para imprimir/presentar:
@@ -2697,7 +2714,7 @@ async function exportInformePDF() {
   const foot=sumIds.length?[filaTotalesInforme(campos,regs,sumIds)]:null;
   const sumIdxs=campos.map((c,i)=>sumIds.includes(c.id)?i:-1).filter(i=>i>=0);
   const {jsPDF}=window.jspdf;
-  const doc=new jsPDF({orientation:'landscape',unit:'pt',compress:true});
+  const doc=new jsPDF({orientation:orientacionInformeActual(),unit:'pt',compress:true});
   const logo=await cargarLogoInforme('img/mosquito_logo_team.png');
   const TITULOS_INFORME={fichajes:'Informe de fichajes', viajes:'Informe de viajes', repostajes:'Informe de repostajes', registros:'Informe'};
   const titulo=`Values Irradiation WEB-210 — ${TITULOS_INFORME[S.informesTipo]||TITULOS_INFORME.registros}`;
@@ -2758,7 +2775,7 @@ async function exportInformeAnuarioPDF() {
 
   const bloques=bloquesDeCampos(campos);
   const { jsPDF }=window.jspdf;
-  const doc=new jsPDF({ orientation:'portrait', unit:'pt', compress:true });
+  const doc=new jsPDF({ orientation:orientacionInformeActual(), unit:'pt', compress:true });
   const [logoMosquito, logoTragsa]=await Promise.all([
     cargarLogoInforme('img/logo_tie_mosquito.png'),
     cargarLogoInforme('img/grupo-tragsa-logo.png'),
@@ -2779,11 +2796,14 @@ async function exportInformeAnuarioPDF() {
     if(completa){
       const boxH=58;
       doc.setDrawColor(30); doc.setLineWidth(1.1); doc.rect(M,y,boxW,boxH);
-      const divX=M+boxW*0.67; doc.line(divX,y,divX,y+boxH);
-      if(logoMosquito){ const w=36,h=w*(logoMosquito.h/logoMosquito.w); doc.addImage(logoMosquito.dataURL,'PNG',M+8,y+(boxH-h)/2,w,h); }
-      const txtX=M+50;
+      const divX=M+boxW*0.70; doc.line(divX,y,divX,y+boxH);
+      // Logo a tamaño de impresión (antes 36pt — se perdía en papel): se calcula su ancho y el del
+      // título a partir de él, así nunca se pisan aunque cambie el tamaño del logo más adelante.
+      const logoW=56;
+      if(logoMosquito){ const h=logoW*(logoMosquito.h/logoMosquito.w); doc.addImage(logoMosquito.dataURL,'PNG',M+8,y+(boxH-h)/2,logoW,h); }
+      const txtX=M+8+logoW+14;
       doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(20);
-      doc.text('TRAGSA-Proyecto piloto TIE Aedes albopictus', txtX, y+22);
+      doc.text('TRAGSA-Obra: 0734346 TIE Aedes albopictus', txtX, y+22);
       doc.setFontSize(9.5); doc.setFont('helvetica','normal');
       doc.text('Sexado, dosificación, transporte e irradiación', txtX, y+38);
       doc.setFontSize(8);
@@ -2800,7 +2820,7 @@ async function exportInformeAnuarioPDF() {
       y+=10;
     } else {
       doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(20);
-      doc.text(`TRAGSA-Proyecto piloto TIE Aedes albopictus — ${tituloPeriodo}`, M, y+8);
+      doc.text(`TRAGSA-Obra: 0734346 TIE Aedes albopictus — ${tituloPeriodo}`, M, y+8);
       doc.setFont('helvetica','normal');
       y+=16;
     }

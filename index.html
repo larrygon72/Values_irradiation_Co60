@@ -768,6 +768,15 @@
       <div class="lft" id="vistaPreviaNota" style="margin-top:6px"></div>
     </div>
 
+    <div class="ssc" id="informeOrientacionCard">
+      <h3>Orientación del PDF</h3>
+      <div style="display:flex;gap:10px">
+        <button class="btn bo bs" id="btnOrientVertical" style="flex:1" onclick="elegirOrientacionInforme('portrait')">📄 Vertical</button>
+        <button class="btn bo bs" id="btnOrientHorizontal" style="flex:1" onclick="elegirOrientacionInforme('landscape')">📃 Horizontal</button>
+      </div>
+      <p class="thhint" style="margin:8px 0 0">Por defecto, vertical en el Anuario y horizontal en el resto — cámbiala aquí si tienes muchos campos elegidos y se quedan apretados.</p>
+    </div>
+
     <div id="informesExportWrap" style="display:none;gap:8px">
       <button class="btn bor bs" id="btnInformeCSV" style="flex:1" onclick="exportInformeCSV()">⬇ CSV</button>
       <button class="btn bor bs" style="flex:1" onclick="exportInformePDF()">⬇ PDF</button>
@@ -935,7 +944,8 @@
         <ul class="help-list">
           <li><b>Historial</b>: busca por texto, filtra por fechas, conductor, irradiador o estado, y exporta lo que estás viendo (CSV, Excel, PDF).</li>
           <li><b>Informes</b>: elige el tipo (registros, fichajes, o conducción — viajes/repostajes), los campos (con <b>Σ suma</b> para totales), el periodo y, si quieres, un <b>filtro</b> (usuario en fichajes; conductor, usuario o irradiador en registros; vehículo o usuario en viajes/repostajes — los totales solo suman lo filtrado). En viajes, la Σ de «Km recorridos» da el total de kilómetros del periodo; en repostajes, la Σ de «Importe» da el gasto total. Revisa la vista previa antes de exportar.</li>
-        <li><b>Anuario</b>: la misma pantalla de Informes, con el periodo fijado al año completo y un diseño propio pensado para presentar a dirección — se exporta solo en PDF. Es una tarjeta por registro, con una barra gris por cada bloque de campos, calcada del formulario semanal en papel del proyecto. Las duraciones (horas de más, duración de la irradiación) se muestran en formato <b>h:mm</b>, por ejemplo 0:30.</li>
+        <li><b>Anuario</b>: la misma pantalla de Informes, con el periodo fijado al año completo y un diseño propio pensado para presentar a dirección — se exporta solo en PDF. Es una tarjeta por registro, con una barra gris por cada bloque de campos, calcada del formulario semanal en papel del proyecto.</li>
+        <li><b>Orientación del PDF</b>: vertical u horizontal, con los botones justo encima de «Exportar». Por defecto va vertical en el Anuario y horizontal en el resto; si eliges muchos campos y se ven apretados, prueba a cambiarla. Las duraciones (horas de más, duración de la irradiación) se muestran en formato <b>h:mm</b>, por ejemplo 0:30.</li>
         </ul>
       </details>
       <details class="help-det">

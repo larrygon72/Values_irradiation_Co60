@@ -156,6 +156,19 @@ es lo de debajo — y unas pocas cosas que se ven.
     lectores (comprobado con `pdftotext`/poppler) la fuente estándar de
     jsPDF no lo dibuja y deja un hueco en blanco; el CSV y la propia app
     siguen mostrando «µ» sin cambios.
+- **Logos más grandes en la cabecera de los PDF** (Historial, Informes y
+  Anuario) — se veían demasiado pequeños al imprimir en papel.
+- **Anuario: «Obra: 0734346»** en el título, en vez de «Proyecto piloto»;
+  la cabecera se ha reajustado para que el logo más grande y el texto
+  nuevo quepan bien en vertical y en horizontal.
+- **Orientación del PDF, a elegir** (Informes y Anuario): dos botones,
+  «Vertical» y «Horizontal», justo encima de los botones de exportar.
+  Por defecto sale vertical en el Anuario (para que quepa bien en una
+  hoja normal) y horizontal en el resto (tienen más columnas); se puede
+  cambiar a mano en cualquier momento, por ejemplo si se han elegido
+  muchos campos y van apretados. La elección se olvida al cambiar de
+  tipo de informe, para no arrastrar una orientación rara a otro informe
+  distinto.
 - **Orden de los informes: cronológico ascendente** (de más antiguo a más
   reciente) en todos los tipos —registros, fichajes, viajes, repostajes y
   anuario—, en la vista previa, el CSV y el PDF. Se reordena en el

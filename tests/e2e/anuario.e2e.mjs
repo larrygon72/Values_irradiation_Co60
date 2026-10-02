@@ -91,7 +91,7 @@ check("La imagen usada es logo_tie_mosquito.png (no mosquito_logo_team.png)", pe
 check("También se carga el logo de GrupoTragsa", peticiones.includes("grupo-tragsa-logo.png"));
 
 const texto = execFileSync("pdftotext", ["-layout", pdfPath, "-"], { encoding: "utf8" });
-check("Cabecera: título del proyecto", texto.includes("TRAGSA-Proyecto piloto TIE Aedes albopictus"));
+check("Cabecera: título con el nº de obra (ya no «Proyecto piloto»)", texto.includes("TRAGSA-Obra: 0734346 TIE Aedes albopictus") && !texto.includes("Proyecto piloto"));
 check("Cabecera: subtítulo", texto.includes("Sexado, dosificación, transporte e irradiación"));
 check("Cabecera: periodo y nº de registros", /Periodo:\s*01\/01\/\d{4}\s*–\s*31\/12\/\d{4}/.test(texto) && /Registros:\s*2/.test(texto));
 check("Ya NO aparece el rótulo «Informe anuario» en ningún sitio del PDF", !texto.includes("Informe anuario"));
@@ -104,6 +104,32 @@ check("El PDF no queda limitado al conductor filtrado antes (Ana): Bob también 
 
 const pageCount = execFileSync("pdfinfo", [pdfPath], { encoding: "utf8" }).match(/Pages:\s*(\d+)/)[1];
 check("El PDF tiene páginas", Number(pageCount) >= 1, pageCount);
+
+// ── Orientación del PDF (vertical por defecto en el anuario; se puede cambiar a horizontal) ──
+const clasesDefecto = await ev(() => [document.getElementById("btnOrientVertical").className, document.getElementById("btnOrientHorizontal").className]);
+check("Anuario: «Vertical» viene activo por defecto", /\bbp\b/.test(clasesDefecto[0]) && /\bbo\b/.test(clasesDefecto[1]), clasesDefecto.join(" | "));
+const tamanoPdf = (ruta) => execFileSync("pdfinfo", [ruta], { encoding: "utf8" }).match(/Page size:\s*([\d.]+) x ([\d.]+)/).slice(1, 3).map(Number);
+const [wV, hV] = tamanoPdf(pdfPath);
+check("El PDF por defecto sale en vertical (más alto que ancho)", hV > wV, `${wV} x ${hV}`);
+
+await ev(() => { const o = document.getElementById("scov"); if (o) o.classList.remove("on"); });
+await page.click("#btnOrientHorizontal"); await w(200);
+const clasesTrasElegir = await ev(() => [document.getElementById("btnOrientVertical").className, document.getElementById("btnOrientHorizontal").className]);
+check("…y cambia de botón activo al elegir Horizontal", /\bbo\b/.test(clasesTrasElegir[0]) && /\bbp\b/.test(clasesTrasElegir[1]), clasesTrasElegir.join(" | "));
+const descargaH = page.waitForEvent("download");
+await ev(() => exportInformePDF());
+const pdfPathH = "/tmp/anuario_check_h.pdf";
+fs.copyFileSync(await (await descargaH).path(), pdfPathH);
+const [wH, hH] = tamanoPdf(pdfPathH);
+check("…y el PDF sale en horizontal (más ancho que alto)", wH > hH, `${wH} x ${hH}`);
+
+await ev(() => { const o = document.getElementById("scov"); if (o) o.classList.remove("on"); });
+await page.selectOption("#informeTipo", "registros"); await w(400);
+const clasesRegistros = await ev(() => [document.getElementById("btnOrientVertical").className, document.getElementById("btnOrientHorizontal").className]);
+check("«Registros» por defecto viene en Horizontal (cambia de tipo, cambia el defecto)", /\bbo\b/.test(clasesRegistros[0]) && /\bbp\b/.test(clasesRegistros[1]), clasesRegistros.join(" | "));
+await page.selectOption("#informeTipo", "anuario"); await w(400);
+const clasesVuelta = await ev(() => [document.getElementById("btnOrientVertical").className, document.getElementById("btnOrientHorizontal").className]);
+check("Al volver a Anuario, la elección anterior se olvida y vuelve a Vertical", /\bbp\b/.test(clasesVuelta[0]) && /\bbo\b/.test(clasesVuelta[1]), clasesVuelta.join(" | "));
 
 check("Sin errores de JavaScript", errores.length === 0, errores.slice(0, 3).join(" | "));
 await browser.close(); srv.close();
