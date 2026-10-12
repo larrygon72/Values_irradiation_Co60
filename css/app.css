@@ -783,3 +783,20 @@ body.theme-light .thseg{background:#F5F8FC}
 .pass-box .lerr{margin-bottom:10px}
 .acct-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:13px;color:var(--txt2)}
 .acct-row strong{color:var(--txt)}
+
+/* ════════════════════════════════════════════════════
+   DETALLE DE DOSÍMETROS (lote / hoja / lectura, por registro)
+════════════════════════════════════════════════════ */
+.dos-detalle-btn{margin-top:8px;width:100%}
+.dos-resumen{margin-top:8px;font-size:12px;color:var(--txt2);background:var(--surf2);
+  border:1px solid var(--brd3);border-radius:var(--rsm);padding:8px 10px;line-height:1.5}
+.dos-resumen b{color:var(--txt)}
+.dos-item{display:flex;align-items:flex-end;gap:8px;padding:10px 0;border-top:1px solid var(--brd)}
+.dos-item:first-child{border-top:0;padding-top:0}
+.dos-item-n{font-family:var(--fmono);font-size:12px;font-weight:700;color:var(--txt3);
+  min-width:26px;padding-bottom:10px}
+.dos-item-flds{display:flex;gap:8px;flex:1;flex-wrap:wrap}
+.dos-item-flds .fl{flex:1;min-width:84px;margin:0}
+.dos-item-leido{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--txt2);
+  white-space:nowrap;padding-bottom:10px}
+.dos-item-leido input{width:auto}

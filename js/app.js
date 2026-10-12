@@ -7,6 +7,9 @@ const REF   = new Date(2024, 9, 16);
 const RR    = 0.27621757;
 const LAM   = Math.LN2 / (5.271 * 365.25);
 const msDay = 86400000;
+// Texto por defecto de las observaciones del detalle de dosímetros (se usa en la inicialización
+// del estado S, más abajo, por eso va declarado aquí arriba).
+const DOS_OBS_DEFECTO='Nada reseñable';
 
 function rate(d)    { return RR * Math.exp(-LAM * (d - REF) / msDay); }
 function tExp(gy,d) { const r=rate(d); return r>0 ? gy/r : 0; }
@@ -86,6 +89,7 @@ const S = {
   urna1:{n:'',date:'',lote:''},
   urna2:{n:'',date:'',lote:''},
   urna3:{n:'',date:'',lote:''},
+  dosDetalle:{observaciones:DOS_OBS_DEFECTO,items:[]},
   md:[0,0,0,0,0,0],
   exCtx:'form',
   histVista:'lista', histRaw:[], histFiltered:[],
@@ -1320,6 +1324,80 @@ function updUrnaSum() {
   }
 }
 
+// ── DETALLE DE DOSÍMETROS (lote, hoja, lectura) ────────
+// El lote y la hoja de lectura suelen ser los mismos para todos los dosímetros del registro, pero
+// pueden cambiar a mitad de una serie — por eso se guardan uno a uno, con el valor del anterior ya
+// puesto por defecto (solo hay que tocarlo donde cambie). "Leído" es independiente en cada uno.
+// Las observaciones son generales para todo el registro, con "Nada reseñable" como texto de salida.
+function onDosCountChange() { actualizarResumenDos(); }
+// Ajusta S.dosDetalle.items a N filas (N = nº de dosímetros ahora mismo), copiando lote/hoja del
+// último dosímetro para las filas nuevas; si N es menor, recorta las que sobran por el final.
+function sincronizarDosItems(n) {
+  const items=S.dosDetalle.items;
+  if(items.length>n){ items.length=n; return; }
+  const ultimo=items[items.length-1]||{lote:'',hoja:'',leido:false};
+  while(items.length<n) items.push({lote:ultimo.lote,hoja:ultimo.hoja,leido:false});
+}
+function openDosDetalle() {
+  const n=parseInt(document.getElementById('fDos').value,10)||0;
+  if(n<=0){ toast('Indica primero cuántos dosímetros son'); return; }
+  sincronizarDosItems(n);
+  renderDosItems();
+  document.getElementById('dosObs').value=S.dosDetalle.observaciones||'';
+  document.getElementById('dosModal').classList.add('on');
+}
+function closeDosDetalle() {
+  document.getElementById('dosModal').classList.remove('on');
+  actualizarResumenDos();
+}
+function renderDosItems() {
+  const box=document.getElementById('dosItemsBox');
+  box.innerHTML=S.dosDetalle.items.map((it,i)=>`
+    <div class="dos-item">
+      <div class="dos-item-n">#${i+1}</div>
+      <div class="dos-item-flds">
+        <div class="fl"><label>Lote</label><input type="text" value="${esc(it.lote)}" placeholder="Lote" data-idx="${i}" data-campo="lote" oninput="onDosItemInput(${i},'lote',this.value)"></div>
+        <div class="fl"><label>Hoja</label><input type="text" value="${esc(it.hoja)}" placeholder="Hoja" data-idx="${i}" data-campo="hoja" oninput="onDosItemInput(${i},'hoja',this.value)"></div>
+      </div>
+      <label class="dos-item-leido"><input type="checkbox" ${it.leido?'checked':''} onchange="onDosItemLeido(${i},this.checked)"> Leído</label>
+    </div>`).join('');
+}
+// Cambiar el lote o la hoja de un dosímetro lo aplica también a los SIGUIENTES que tuvieran el
+// mismo valor que antes (así, si cambia a mitad de la serie, basta con tocarlo una vez en el
+// primero donde cambia — no hace falta repetirlo fila a fila). Se para en el primer dosímetro que
+// ya tuviera un valor distinto, porque ahí ya se había marcado otro cambio.
+function onDosItemInput(i, campo, valor) {
+  const items=S.dosDetalle.items;
+  if(!items[i]) return;
+  const anterior=items[i][campo];
+  items[i][campo]=valor;
+  let j=i+1;
+  while(j<items.length && items[j][campo]===anterior){
+    items[j][campo]=valor;
+    const inp=document.querySelector(`#dosItemsBox input[data-idx="${j}"][data-campo="${campo}"]`);
+    if(inp) inp.value=valor;
+    j++;
+  }
+}
+function onDosItemLeido(i, marcado) { if(S.dosDetalle.items[i]) S.dosDetalle.items[i].leido=marcado; }
+function onDosObsInput() { S.dosDetalle.observaciones=document.getElementById('dosObs').value; }
+function actualizarResumenDos() {
+  const el=document.getElementById('dosResumen');
+  const items=S.dosDetalle.items;
+  if(!el) return;
+  if(!items.length){ el.style.display='none'; return; }
+  const leidos=items.filter(it=>it.leido).length;
+  const unicos=arr=>[...new Set(arr.map(v=>(v||'').trim()).filter(Boolean))];
+  const lotes=unicos(items.map(it=>it.lote));
+  const hojas=unicos(items.map(it=>it.hoja));
+  const n=parseInt(document.getElementById('fDos').value,10)||0;
+  const aviso=n&&n!==items.length?` <span style="color:var(--amber-l,#f59f00)">· ${items.length} de ${n} detallados</span>`:'';
+  el.style.display='block';
+  el.innerHTML=`<b>${items.length}</b> dosímetro${items.length===1?'':'s'} · <b>${leidos}</b> leído${leidos===1?'':'s'}${aviso}`+
+    (lotes.length?`<br>Lote${lotes.length===1?'':'s'}: ${esc(lotes.join(', '))}`:'')+
+    (hojas.length?`<br>Hoja${hojas.length===1?'':'s'}: ${esc(hojas.join(', '))}`:'');
+}
+
 // ── FORM SAVE ─────────────────────────────────────────
 // ── Estado de carga en botones (spinner + deshabilitado) ──
 const _btnOrigLabel={};
@@ -1400,6 +1478,7 @@ async function guardar() {
     // Datos de urnas
     nUrnas: t||'',
     u1:{...S.urna1}, u2:{...S.urna2}, u3:{...S.urna3},
+    dosDetalle:{observaciones:S.dosDetalle.observaciones, items:S.dosDetalle.items.map(it=>({...it}))},
     // Calculados automáticamente
     semana: document.getElementById('semana').value,
     tasa:   document.getElementById('tasa').value,
@@ -1451,6 +1530,8 @@ function limpiarForm() {
   document.getElementById('totBan').style.display='none';
   const b=document.getElementById('dosWrap').querySelector('.aut'); if(b) b.remove();
   renderUrnaCards();
+  S.dosDetalle={observaciones:DOS_OBS_DEFECTO,items:[]};
+  actualizarResumenDos();
   stab('urnas', document.querySelector('.step[data-step="urnas"]'));
 }
 // Los registros guardados en este dispositivo solo los ve quien los hizo (en equipos compartidos).
@@ -2005,6 +2086,11 @@ function cargarRegistroEnFormulario(r) {
   S.urna2=r.urna2&&typeof r.urna2==='object'?{...r.urna2}:{n:'',date:'',lote:''};
   S.urna3=r.urna3&&typeof r.urna3==='object'?{...r.urna3}:{n:'',date:'',lote:''};
   renderUrnaCards(); updMpill();
+  S.dosDetalle = r.dosimetros_detalle && typeof r.dosimetros_detalle==='object'
+    ? { observaciones: r.dosimetros_detalle.observaciones || DOS_OBS_DEFECTO,
+        items: (Array.isArray(r.dosimetros_detalle.items)?r.dosimetros_detalle.items:[]).map(it=>({lote:it.lote||'',hoja:it.hoja||'',leido:!!it.leido})) }
+    : { observaciones: DOS_OBS_DEFECTO, items: [] };
+  actualizarResumenDos();
   go('form');
   stab('urnas', document.querySelector('.step[data-step="urnas"]'));
 }
@@ -2241,6 +2327,13 @@ function fmtUrna(u) {
   const partes=[u.n?`Nº ${u.n}`:'', u.date?fmt(pd(u.date)):'', u.lote?`Lote ${u.lote}`:''].filter(Boolean);
   return partes.join(' · ');
 }
+// Resumen de los dosímetros de UN registro: cuántos están leídos y qué lotes/hojas distintos
+// aparecen (normalmente uno de cada, pero puede haber varios si cambiaron a mitad de la serie).
+function dosResumen(r) {
+  const items=(r.dosimetros_detalle&&Array.isArray(r.dosimetros_detalle.items))?r.dosimetros_detalle.items:[];
+  const unicos=campo=>[...new Set(items.map(it=>(it[campo]||'').trim()).filter(Boolean))];
+  return { leidos:items.filter(it=>it.leido).length, lotes:unicos('lote').join(', '), hojas:unicos('hoja').join(', '), items };
+}
 // Catálogo de TODOS los campos disponibles en los formularios, agrupados
 // igual que la ficha de detalle del historial, para que el usuario elija
 // cuáles quiere ver en su informe.
@@ -2272,6 +2365,10 @@ const CAMPOS_INFORME=[
     sum:r=>(r.h_inicio_irr&&r.h_fin_irr)?minutosEntre(r.h_inicio_irr,r.h_fin_irr)/60:0},
   {id:'expUsv',       label:'Exposición operador (µSv)', grupo:'Irradiación', get:r=>r.exposicion_usv??'', sumable:true},
   {id:'dosimetros',   label:'Nº dosímetros',             grupo:'Irradiación', get:r=>r.dosimetros??'', sumable:true},
+  {id:'dosLeidos',    label:'Dosímetros leídos',         grupo:'Dosímetros', get:r=>dosResumen(r).leidos, sumable:true},
+  {id:'dosLotes',     label:'Lotes de dosímetros',       grupo:'Dosímetros', get:r=>dosResumen(r).lotes},
+  {id:'dosHojas',     label:'Hojas de dosímetros',       grupo:'Dosímetros', get:r=>dosResumen(r).hojas},
+  {id:'dosObsCampo',  label:'Observaciones dosímetros',  grupo:'Dosímetros', get:r=>(r.dosimetros_detalle&&r.dosimetros_detalle.observaciones)||''},
   {id:'nUrnas',       label:'Nº urnas',                  grupo:'Urnas', get:r=>r.n_urnas??'', sumable:true},
   {id:'urna1',        label:'Urna 1 (nº · fecha · lote)',grupo:'Urnas', get:r=>fmtUrna(r.urna1)},
   {id:'urna2',        label:'Urna 2 (nº · fecha · lote)',grupo:'Urnas', get:r=>fmtUrna(r.urna2)},
@@ -2594,6 +2691,30 @@ function actualizarResumenCampos() {
 }
 // ── Vista previa: se ve antes de poder exportar o imprimir ──
 const VISTA_PREVIA_LIMITE=50;
+// Total de dosímetros por lote y por hoja, sumando TODOS los registros filtrados (no solo los que
+// tengan detalle relleno). Solo tiene sentido en Registros y en el Anuario — son los únicos
+// informes con dosímetros. Se ordena alfabéticamente para que la lista salga siempre igual.
+function totalesDosimetrosPorLoteYHoja(regs) {
+  const porLote=new Map(), porHoja=new Map();
+  const sumar=(mapa,clave)=>{ clave=String(clave||'').trim(); if(!clave) return; mapa.set(clave,(mapa.get(clave)||0)+1); };
+  (regs||[]).forEach(r=>{
+    const items=(r.dosimetros_detalle&&Array.isArray(r.dosimetros_detalle.items))?r.dosimetros_detalle.items:[];
+    items.forEach(it=>{ sumar(porLote,it.lote); sumar(porHoja,it.hoja); });
+  });
+  const ordenar=mapa=>[...mapa.entries()].sort((a,b)=>a[0].localeCompare(b[0],'es'));
+  return { porLote:ordenar(porLote), porHoja:ordenar(porHoja) };
+}
+function tieneDatosDosimetros(regs) { return (regs||[]).some(r=>r.dosimetros_detalle&&Array.isArray(r.dosimetros_detalle.items)&&r.dosimetros_detalle.items.length); }
+function esInformeConDosimetros() { return S.informesTipo==='registros'||esInformeAnuario(); }
+// Bloque HTML "Totales por lote / Totales por hoja" (mismo formato en vista previa que en el PDF).
+function htmlTotalesDosimetros(regs) {
+  const { porLote, porHoja } = totalesDosimetrosPorLoteYHoja(regs);
+  const lista=(titulo,pares)=>!pares.length?'':`
+    <div style="margin-top:10px"><b>${titulo}</b>
+      <table class="dtbl" style="margin-top:4px"><tbody>${pares.map(([k,n])=>`<tr><td>${esc(k)}</td><td class="tdSuma">${n}</td></tr>`).join('')}</tbody></table>
+    </div>`;
+  return lista('Total de dosímetros por lote',porLote)+lista('Total de dosímetros por hoja',porHoja);
+}
 function renderVistaPreviaInforme() {
   const wrap=document.getElementById('vistaPreviaWrap');
   const exportWrap=document.getElementById('informesExportWrap');
@@ -2631,12 +2752,20 @@ function renderVistaPreviaInforme() {
     ? `${notaRecorte} El total suma TODOS los registros encontrados, no solo los mostrados.`
     : notaRecorte;
   if(exportWrap) exportWrap.style.display='flex';
+  const dosBox=document.getElementById('vistaPreviaDosimetros');
+  if(dosBox){
+    if(esInformeConDosimetros() && tieneDatosDosimetros(regs)){
+      dosBox.innerHTML=htmlTotalesDosimetros(regs); dosBox.style.display='block';
+    } else { dosBox.style.display='none'; dosBox.innerHTML=''; }
+  }
 }
 function ocultarVistaPreviaInforme() {
   const wrap=document.getElementById('vistaPreviaWrap');
   const exportWrap=document.getElementById('informesExportWrap');
+  const dosBox=document.getElementById('vistaPreviaDosimetros');
   if(wrap) wrap.style.display='none';
   if(exportWrap) exportWrap.style.display='none';
+  if(dosBox){ dosBox.style.display='none'; dosBox.innerHTML=''; }
 }
 async function buscarInformes() {
   const desde=document.getElementById('iDesde').value;
@@ -2695,7 +2824,13 @@ async function exportInformeCSV() {
   const rows=regs.map(r=>campos.map(c=>c.get(r)));
   const sumIds=camposASumar();
   if(sumIds.length) rows.push(filaTotalesInforme(campos,regs,sumIds));
-  const content=[header,...rows].map(csvFila).join('\r\n');
+  let bloques=[[header,...rows]];
+  if(esInformeConDosimetros()){
+    const { porLote, porHoja } = totalesDosimetrosPorLoteYHoja(regs);
+    if(porLote.length) bloques.push([[],['Total de dosímetros por lote'],['Lote','Cantidad'],...porLote]);
+    if(porHoja.length) bloques.push([[],['Total de dosímetros por hoja'],['Hoja','Cantidad'],...porHoja]);
+  }
+  const content=bloques.map(b=>b.map(csvFila).join('\r\n')).join('\r\n');
   const filename=nombreArchivoInforme('csv');
   const result=await dlFile(filename,content,'text/csv;charset=utf-8;');
   if(result===null) return;
@@ -2733,11 +2868,36 @@ async function exportInformePDF() {
       }
     },
   });
+  if(esInformeConDosimetros()) dibujarTotalesDosimetrosPDF(doc, totalesDosimetrosPorLoteYHoja(regs));
   const blob=doc.output('blob');
   const filename=nombreArchivoInforme('pdf');
   const result=await dlBlob(filename,blob);
   if(result===null) return;
   showSaveDlg(filename,'pdf',blob.size,'informes',result);
+}
+// Añade, a partir de donde terminó la tabla principal, "Total de dosímetros por lote" y "...por
+// hoja" (una mini-tabla cada uno, con salto de página si no caben). La usan tanto el informe
+// normal de Registros como el Anuario — mismo aspecto en los dos.
+// "onNuevaPagina", si se indica, dibuja la cabecera propia de ese informe (p. ej. la del Anuario) y
+// devuelve el Y por el que seguir; sin ella, un salto de página simple (lo usa el informe normal).
+function dibujarTotalesDosimetrosPDF(doc, { porLote, porHoja }, opciones) {
+  if(!porLote.length && !porHoja.length) return;
+  const onNuevaPagina=(opciones&&opciones.onNuevaPagina)||(()=>40);
+  const M=doc.internal.pageSize.getWidth()>doc.internal.pageSize.getHeight()?40:36;
+  let y=(doc.lastAutoTable?doc.lastAutoTable.finalY:40)+22;
+  const pageH=doc.internal.pageSize.getHeight();
+  [['Total de dosímetros por lote',porLote,'Lote'],['Total de dosímetros por hoja',porHoja,'Hoja']].forEach(([titulo,pares,etiqueta])=>{
+    if(!pares.length) return;
+    if(y>pageH-80){ doc.addPage(); y=onNuevaPagina(); }
+    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(20);
+    doc.text(titulo, M, y); y+=8;
+    doc.autoTable({
+      startY:y, margin:{left:M}, tableWidth:220,
+      head:[[etiqueta,'Cantidad']], body:pares,
+      styles:{fontSize:8,cellPadding:3}, headStyles:{fillColor:[76,110,245]},
+    });
+    y=doc.lastAutoTable.finalY+18;
+  });
 }
 
 // ── INFORME ANUARIO — FICHA POR REGISTRO (formulario semanal en papel del proyecto) ──
@@ -2799,11 +2959,11 @@ async function exportInformeAnuarioPDF() {
       const divX=M+boxW*0.70; doc.line(divX,y,divX,y+boxH);
       // Logo a tamaño de impresión (antes 36pt — se perdía en papel): se calcula su ancho y el del
       // título a partir de él, así nunca se pisan aunque cambie el tamaño del logo más adelante.
-      const logoW=72;
+      const logoW=56;
       if(logoMosquito){ const h=logoW*(logoMosquito.h/logoMosquito.w); doc.addImage(logoMosquito.dataURL,'PNG',M+8,y+(boxH-h)/2,logoW,h); }
       const txtX=M+8+logoW+14;
       doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(20);
-      doc.text('TRAGSA-TIE Aedes albopictus. Obra: 0734346 ', txtX, y+22);
+      doc.text('TRAGSA-Obra: 0734346 TIE Aedes albopictus', txtX, y+22);
       doc.setFontSize(9.5); doc.setFont('helvetica','normal');
       doc.text('Sexado, dosificación, transporte e irradiación', txtX, y+38);
       doc.setFontSize(8);
@@ -2871,6 +3031,11 @@ async function exportInformeAnuarioPDF() {
       doc.setDrawColor(20);
     }
   });
+
+  dibujarTotalesDosimetrosPDF(doc, totalesDosimetrosPorLoteYHoja(regs), {
+    onNuevaPagina: () => { pagina++; const yy=dibujarCabecera(false); piePagina(pagina); return yy; },
+  });
+  if(doc.lastAutoTable) cursorY=doc.lastAutoTable.finalY+14;
 
   // Firma de dirección, siempre al final del informe (nueva página si no cabe).
   let firmaY=cursorY+40;

@@ -144,6 +144,22 @@
   </div>
 </div>
 
+<!-- ══════════ DETALLE DE DOSÍMETROS ══════════ -->
+<div class="ov" id="dosModal" role="dialog" aria-modal="true" aria-label="Detalle de dosímetros">
+  <div class="modal">
+    <div class="mhd"><b>🔬 Detalle de dosímetros</b><button class="x" onclick="closeDosDetalle()">✕</button></div>
+    <div class="mbdy">
+      <p class="thhint" style="margin:0 0 12px">El lote y la hoja se copian del dosímetro anterior — cámbialos solo en el que corresponda si varían a mitad de la serie. «Leído» es independiente en cada uno.</p>
+      <div id="dosItemsBox"></div>
+      <div class="fl" style="margin-top:14px">
+        <label>Observaciones</label>
+        <textarea id="dosObs" rows="2" oninput="onDosObsInput()"></textarea>
+      </div>
+    </div>
+    <div class="mft"><button class="btn bp bw" onclick="closeDosDetalle()">Hecho</button></div>
+  </div>
+</div>
+
 <!-- ══════════ CAMBIAR CONTRASEÑA ══════════ -->
 <div class="rdiag" id="passOv" role="dialog" aria-modal="true" aria-labelledby="passTitle">
   <div class="rbox pass-box">
@@ -554,8 +570,11 @@
       </div>
       <div class="fl"><label>Dosímetros</label>
         <div class="cfr" id="dosWrap">
-          <input type="number" id="fDos" placeholder="Nº dosímetros" min="1">
-        </div></div>
+          <input type="number" id="fDos" placeholder="Nº dosímetros" min="1" oninput="onDosCountChange()">
+        </div>
+        <button type="button" class="btn bo bs dos-detalle-btn" onclick="openDosDetalle()">🔬 Lote, hoja y lectura</button>
+        <div class="dos-resumen" id="dosResumen" style="display:none"></div>
+      </div>
 
       <div class="dash-sect-hd" style="margin-top:4px">Exposición del operador</div>
       <div class="card" style="height:auto">
@@ -766,6 +785,7 @@
         <table class="dtbl" id="vistaPreviaTabla"></table>
       </div>
       <div class="lft" id="vistaPreviaNota" style="margin-top:6px"></div>
+      <div id="vistaPreviaDosimetros" style="display:none;margin-top:14px"></div>
     </div>
 
     <div class="ssc" id="informeOrientacionCard">
@@ -928,6 +948,7 @@
           <li>Pulsa <b>Nuevo registro</b> (o <b>Nuevo</b> abajo en el móvil).</li>
           <li>Recorre los pasos: <b>Datos</b> (fecha y urnas) → <b>Transporte</b> → <b>Temperatura</b> → <b>Irradiación</b> → <b>Obs.</b> Los campos con ⚙ se calculan solos.</li>
           <li>Pulsa <b>Guardar</b>. Solo la <b>fecha de irradiación</b> es obligatoria: el resto puede completarse más tarde.</li>
+          <li>En <b>Irradiación</b>, junto a «Dosímetros», el botón <b>🔬 Lote, hoja y lectura</b> abre el detalle de cada dosímetro: lote y hoja se copian del anterior (cámbialos solo donde varíen a mitad de la serie); «Leído» es independiente en cada uno; las observaciones son generales, con «Nada reseñable» por defecto.</li>
           <li>Para corregir un registro: <b>Historial</b> → toca el registro → <b>Editar</b>. Solo puedes editar y borrar los tuyos (un administrador puede con todos).</li>
         </ul>
       </details>
@@ -943,7 +964,7 @@
         <summary>Historial, Informes y exportar</summary>
         <ul class="help-list">
           <li><b>Historial</b>: busca por texto, filtra por fechas, conductor, irradiador o estado, y exporta lo que estás viendo (CSV, Excel, PDF).</li>
-          <li><b>Informes</b>: elige el tipo (registros, fichajes, o conducción — viajes/repostajes), los campos (con <b>Σ suma</b> para totales), el periodo y, si quieres, un <b>filtro</b> (usuario en fichajes; conductor, usuario o irradiador en registros; vehículo o usuario en viajes/repostajes — los totales solo suman lo filtrado). En viajes, la Σ de «Km recorridos» da el total de kilómetros del periodo; en repostajes, la Σ de «Importe» da el gasto total. Revisa la vista previa antes de exportar.</li>
+          <li><b>Informes</b>: elige el tipo (registros, fichajes, o conducción — viajes/repostajes), los campos (con <b>Σ suma</b> para totales), el periodo y, si quieres, un <b>filtro</b> (usuario en fichajes; conductor, usuario o irradiador en registros; vehículo o usuario en viajes/repostajes — los totales solo suman lo filtrado). En viajes, la Σ de «Km recorridos» da el total de kilómetros del periodo; en repostajes, la Σ de «Importe» da el gasto total. En registros y Anuario, si hay dosímetros con lote y hoja, debajo de la vista previa (y al final del CSV y del PDF) sale el total de dosímetros por cada lote y por cada hoja. Revisa la vista previa antes de exportar.</li>
         <li><b>Anuario</b>: la misma pantalla de Informes, con el periodo fijado al año completo y un diseño propio pensado para presentar a dirección — se exporta solo en PDF. Es una tarjeta por registro, con una barra gris por cada bloque de campos, calcada del formulario semanal en papel del proyecto.</li>
         <li><b>Orientación del PDF</b>: vertical u horizontal, con los botones justo encima de «Exportar». Por defecto va vertical en el Anuario y horizontal en el resto; si eliges muchos campos y se ven apretados, prueba a cambiarla. Las duraciones (horas de más, duración de la irradiación) se muestran en formato <b>h:mm</b>, por ejemplo 0:30.</li>
         </ul>

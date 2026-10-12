@@ -169,6 +169,32 @@ es lo de debajo — y unas pocas cosas que se ven.
   muchos campos y van apretados. La elección se olvida al cambiar de
   tipo de informe, para no arrastrar una orientación rara a otro informe
   distinto.
+- **Detalle de dosímetros** (lote, hoja de lectura y si se ha leído), por
+  registro. En el formulario, en **Irradiación**, junto a «Dosímetros»,
+  el botón **🔬 Lote, hoja y lectura** abre una pantalla con una fila por
+  dosímetro:
+  - **Lote** y **Hoja**: se copian del dosímetro anterior — solo hay que
+    tocarlos en el que cambie, y el cambio se aplica solo a los
+    siguientes (hasta el próximo que ya fuera distinto). Así, si la
+    hoja cambia a mitad de una serie, se escribe una vez y punto.
+  - **Leído**: una casilla independiente por dosímetro — nunca se copia.
+  - **Observaciones**: un único texto para todo el registro, con
+    «Nada reseñable» puesto por defecto; se cambia solo si hay algo que
+    anotar.
+  - El formulario muestra un resumen (nº de dosímetros, leídos, lotes y
+    hojas) una vez hay algo relleno.
+  - Se guarda en una columna nueva (`registros.dosimetros_detalle`,
+    JSONB) que no afecta a nada de lo que ya había.
+  - **En Informes**: cuatro campos nuevos del bloque de Registros —
+    *Dosímetros leídos* (Σ sumable), *Lotes de dosímetros*, *Hojas de
+    dosímetros* y *Observaciones dosímetros* — disponibles también en
+    el Anuario (sale como un bloque «DOSÍMETROS» más en cada ficha).
+    Además, en los informes de Registros y del Anuario, si hay algún
+    dosímetro con lote o con hoja, aparecen automáticamente dos tablas
+    —**total de dosímetros por lote** y **por hoja**, sumando todos los
+    registros del periodo (no solo los que se ven en la vista previa)—
+    en la propia vista previa, al final del CSV y al final del PDF
+    (antes de la firma, en el caso del Anuario).
 - **Orden de los informes: cronológico ascendente** (de más antiguo a más
   reciente) en todos los tipos —registros, fichajes, viajes, repostajes y
   anuario—, en la vista previa, el CSV y el PDF. Se reordena en el
@@ -198,13 +224,13 @@ es lo de debajo — y unas pocas cosas que se ven.
   (`api/_lib/http.js`: método, sesión, errores), validación
   (`validate.js`), utilidades de base de datos (`db.js`) y auditoría
   (`audit.js`). Cada endpoint queda con solo su lógica.
-- **Pruebas automáticas**: `npm install && npm test` (26 pruebas de la API
+- **Pruebas automáticas**: `npm install && npm test` (27 pruebas de la API
   con una base de datos simulada, sin necesitar Supabase). En
   `tests/e2e/` hay pruebas en navegador real (Chromium) —recorrido por
   todas las pantallas, XSS, sesión, sin conexión, exportaciones, CSP—:
   `npm i --no-save playwright && npx playwright install chromium` y luego
   `node --import ./tests/helpers/register.mjs tests/e2e/smoke.e2e.mjs`
-  (también `features.e2e.mjs`, `extras.e2e.mjs`, `informes.e2e.mjs`, `anuario.e2e.mjs` y `xss.e2e.mjs`; `anuario.e2e.mjs` necesita además `pdftotext`/`pdfinfo` — del paquete `poppler-utils` — para leer el PDF generado). Ninguna necesita Supabase.
+  (también `features.e2e.mjs`, `extras.e2e.mjs`, `informes.e2e.mjs`, `anuario.e2e.mjs`, `dosimetros.e2e.mjs` y `xss.e2e.mjs`; `anuario.e2e.mjs` necesita además `pdftotext`/`pdfinfo` — del paquete `poppler-utils` — para leer el PDF generado). Ninguna necesita Supabase.
 - `npm run check` comprueba la sintaxis de todo.
 
 ### Limitaciones conocidas / siguientes pasos recomendados

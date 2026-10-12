@@ -394,3 +394,11 @@ create table if not exists auditoria (
 );
 create index if not exists auditoria_created_at_idx on auditoria (created_at desc);
 alter table auditoria enable row level security;
+
+-- ── Registros: detalle de dosímetros (lote, hoja, lectura) ───────────
+-- Un registro puede llevar varios dosímetros; cada uno pertenece a un lote y a una hoja de
+-- lectura, y se marca independientemente si ya se ha leído. El lote y la hoja suelen ser los
+-- mismos para todos los dosímetros de un registro, pero pueden cambiar a mitad de una serie —
+-- por eso se guardan por dosímetro, no uno solo para todo el registro.
+-- Estructura: {"observaciones": "...", "items": [{"lote":"...", "hoja":"...", "leido":true}, ...]}
+alter table registros add column if not exists dosimetros_detalle jsonb;

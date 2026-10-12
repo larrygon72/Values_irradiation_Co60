@@ -209,6 +209,43 @@ test("registros: guardar valida los datos y no filtra errores internos", async (
   assert.match(r.body.error, /ref\./);
 });
 
+test("registros: detalle de dosímetros (lote/hoja/leído) se valida y se guarda bien", async () => {
+  const ana = await login("ana");
+  const detalle = { observaciones: "Nada reseñable", items: [
+    { lote: "L-09", hoja: "12", leido: true },
+    { lote: "L-09", hoja: "12", leido: false },
+    { lote: "L-10", hoja: "13", leido: true },
+  ] };
+  const r = await api("registros", "guardar", ana, registro({ dos: "3", dosDetalle: detalle }));
+  assert.equal(r.status, 200);
+  const fila = db.t("registros").find((x) => x.id === r.body.id);
+  assert.deepEqual(fila.dosimetros_detalle, detalle);
+
+  // Sin detalle en absoluto -> null, no un objeto vacío ni error
+  const r2 = await api("registros", "guardar", ana, registro({ dos: "1" }));
+  assert.equal(db.t("registros").find((x) => x.id === r2.body.id).dosimetros_detalle, null);
+
+  // Objeto raro / campos de más -> se limpia, no se cae
+  const r3 = await api("registros", "guardar", ana, registro({ dos: "2", dosDetalle: { observaciones: "  ", items: [{ lote: "  L-1  ", hoja: 12, leido: "si", otraCosa: "x" }, null, "no-es-objeto"] } } ));
+  assert.equal(r3.status, 200);
+  const fila3 = db.t("registros").find((x) => x.id === r3.body.id).dosimetros_detalle;
+  assert.equal(fila3.observaciones, null); // solo espacios -> se queda vacío
+  assert.equal(fila3.items.length, 3);
+  assert.equal(fila3.items[0].lote, "L-1"); // recortado
+  assert.equal(fila3.items[0].leido, true); // cualquier valor truthy -> boolean
+  assert.deepEqual(fila3.items[1], { lote: "", hoja: "", leido: false }); // null -> fila vacía, no error
+  assert.equal(fila3.items.length <= 1000, true);
+
+  // Límite de longitud en lote/hoja (como el resto de campos de texto)
+  const r4 = await api("registros", "guardar", ana, registro({ dos: "1", dosDetalle: { items: [{ lote: "x".repeat(41), hoja: "1", leido: false }] } }));
+  assert.equal(r4.status, 400);
+
+  // "actualizar" también pasa por el mismo validador
+  const r5 = await api("registros", "actualizar", ana, { id: r.body.id, registro: registro({ dos: "1", dosDetalle: { items: [{ lote: "L-99", hoja: "1", leido: true }] } }) });
+  assert.equal(r5.status, 200);
+  assert.deepEqual(db.t("registros").find((x) => x.id === r.body.id).dosimetros_detalle.items[0], { lote: "L-99", hoja: "1", leido: true });
+});
+
 test("registros: reintentar con el mismo uid no duplica; sin la columna client_uid sigue guardando", async () => {
   const ana = await login("ana");
   const a = await api("registros", "guardar", ana, registro({ uid: "abc12345-def" }));
