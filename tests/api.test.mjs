@@ -385,6 +385,56 @@ test("conducción: listarViajes/listarRepostajes sin 'completo' se quedan en 500
   assert.equal(muchisimos.body.truncado, true);
 });
 
+test("calibraciones: solo admin gestiona; validación; una sola activa; la activa no se borra", async () => {
+  const ana = await login("ana"), admin = await login("Admin");
+  const datos = { nombre: "Aparato nuevo 2027", fechaReferencia: "2027-01-15", tasaGyH: 720 };
+  assert.equal((await api("calibraciones", "crear", ana, datos)).status, 403, "un usuario normal no puede crear");
+  assert.equal((await api("calibraciones", "listPublic", ana)).status, 200, "pero sí leer la lista");
+  for (const malo of [{ ...datos, nombre: "  " }, { ...datos, fechaReferencia: "2027-13-40" }, { ...datos, fechaReferencia: "" }, { ...datos, tasaGyH: 0 }, { ...datos, tasaGyH: -5 }, { ...datos, tasaGyH: "abc" }, { ...datos, tasaGyH: undefined }]) {
+    assert.equal((await api("calibraciones", "crear", admin, malo)).status, 400, JSON.stringify(malo));
+  }
+  const a = await api("calibraciones", "crear", admin, datos);
+  const b = await api("calibraciones", "crear", admin, { ...datos, nombre: "Aparato B", tasaGyH: "900,5" });
+  assert.equal(a.status, 200);
+  assert.equal(db.t("calibraciones_irradiacion").length, 2);
+  assert.equal(db.t("calibraciones_irradiacion").find((c) => c.nombre === "Aparato B").tasa_gy_h, 900.5, "acepta coma decimal");
+  assert.ok(db.t("calibraciones_irradiacion").every((c) => c.activa === false), "al crear no se activa nada solo");
+
+  assert.equal((await api("calibraciones", "activar", ana, { id: a.body.id })).status, 403);
+  assert.equal((await api("calibraciones", "activar", admin, { id: a.body.id })).status, 200);
+  assert.equal((await api("calibraciones", "activar", admin, { id: b.body.id })).status, 200);
+  assert.deepEqual(db.t("calibraciones_irradiacion").filter((c) => c.activa).map((c) => c.id), [b.body.id], "solo una activa a la vez");
+  assert.equal((await api("calibraciones", "activar", admin, { id: "00000000-0000-4000-8000-000000000000" })).status, 404);
+
+  const borrarActiva = await api("calibraciones", "eliminar", admin, { id: b.body.id });
+  assert.equal(borrarActiva.status, 400);
+  assert.match(borrarActiva.body.error, /activa/i);
+  assert.equal((await api("calibraciones", "eliminar", ana, { id: a.body.id })).status, 403);
+  assert.equal((await api("calibraciones", "eliminar", admin, { id: a.body.id })).status, 200);
+
+  assert.equal((await api("calibraciones", "editar", admin, { id: b.body.id, tasaGyH: 950 })).status, 200);
+  assert.equal(db.t("calibraciones_irradiacion")[0].tasa_gy_h, 950);
+  assert.equal((await api("calibraciones", "editar", admin, { id: b.body.id })).status, 400, "sin cambios -> error claro");
+
+  assert.equal((await api("calibraciones", "activarOriginal", ana, {})).status, 403);
+  assert.equal((await api("calibraciones", "activarOriginal", admin, {})).status, 200);
+  assert.ok(db.t("calibraciones_irradiacion").every((c) => c.activa === false));
+  assert.equal((await api("calibraciones", "eliminar", admin, { id: b.body.id })).status, 200, "ya inactiva, se puede borrar");
+  assert.ok(db.t("auditoria").some((x) => x.entidad === "calibracion" && x.accion === "activar"), "los cambios quedan auditados");
+});
+
+test("registros: se guarda con qué calibración se calculó (y vacío = el aparato de fábrica)", async () => {
+  const ana = await login("ana");
+  const r1 = await api("registros", "guardar", ana, registro({ calibNombre: "Aparato B" }));
+  assert.equal(db.t("registros").find((x) => x.id === r1.body.id).calibracion_nombre, "Aparato B");
+  const r2 = await api("registros", "guardar", ana, registro({ calibNombre: "" }));
+  assert.equal(db.t("registros").find((x) => x.id === r2.body.id).calibracion_nombre, null);
+  const r3 = await api("registros", "guardar", ana, registro());
+  assert.equal(db.t("registros").find((x) => x.id === r3.body.id).calibracion_nombre, null);
+  const r4 = await api("registros", "guardar", ana, registro({ calibNombre: "x".repeat(121) }));
+  assert.equal(r4.status, 400);
+});
+
 test("estaciones e irradiadores: solo admin gestiona; nombres validados", async () => {
   const ana = await login("ana"), admin = await login("Admin");
   assert.equal((await api("estaciones", "crear", ana, { nombre: "Repsol  Norte" })).status, 200);

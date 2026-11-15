@@ -152,6 +152,34 @@ await ev(async () => { const r = await navigator.serviceWorker.getRegistration()
 await page.waitForFunction(() => document.getElementById("updBar").classList.contains("on"), null, { timeout: 8000 }).catch(() => {});
 check("Al publicarse una versión nueva aparece «Actualizar»", await ev(() => document.getElementById("updBar").classList.contains("on")));
 
+// ── Conductor/irradiador "desaparecido" al editar un registro antiguo ──
+// Si el usuario o el irradiador de un registro ya no está en la lista activa (borrado o
+// desactivado), el campo debe seguir mostrando a quién/qué se refería — no quedarse en blanco.
+await entrar("Admin");
+db.tables.registros = [{ id: crypto.randomUUID(), created_at: new Date().toISOString(), fecha_irradiacion: "2026-02-10", semana_iso: 7, creado_por: "ana", conductor_nick: "exempleado", conductor_nombre: "Pedro Ex-Empleado", conductor_codigo: "PEX", irradiador_id: "irr-ya-no-existe", irradiador_nombre: "Equipo Viejo Desactivado", n_urnas: 2 }];
+await ev(() => go("hist")); await w(400);
+await ev(() => { document.getElementById("hDesde").value = "2000-01-01"; document.getElementById("hHasta").value = "2100-12-31"; });
+await ev(() => buscarHistorial()); await w(900);
+const idHist = db.t("registros")[0].id;
+await ev((id) => abrirDetalleRegistro(id), idHist); await w(300);
+await ev(() => editarRegistroDesdeDetalle()); await w(400);
+const condTxt = await ev(() => document.getElementById("fResp").selectedOptions[0]?.textContent);
+const condCod = await page.inputValue("#fRespCod");
+check("Un conductor ya borrado se sigue mostrando al editar (con su nombre guardado), no en blanco", condTxt === "Pedro Ex-Empleado (ya no disponible)" && condCod === "PEX", `${condTxt} / ${condCod}`);
+const irrTxt = await ev(() => document.getElementById("fIrrSel").selectedOptions[0]?.textContent);
+const irrHid = await ev(() => document.getElementById("fIrr")?.value);
+check("Un irradiador ya desactivado tampoco «desaparece» al editar", irrTxt === "Equipo Viejo Desactivado (ya no disponible)" && irrHid === "Equipo Viejo Desactivado", `${irrTxt} / ${irrHid}`);
+await ev(() => { populateConductorSelect(); populateIrradiadorSelect(); populateConductorSelect(); populateIrradiadorSelect(); });
+const condTxt2 = await ev(() => document.getElementById("fResp").selectedOptions[0]?.textContent);
+const irrTxt2 = await ev(() => document.getElementById("fIrrSel").selectedOptions[0]?.textContent);
+check("…y repetir el refresco no acumula texto ni se degrada", condTxt2 === condTxt && irrTxt2 === irrTxt, `${condTxt2} | ${irrTxt2}`);
+db.t("usuarios").push({ ...db.t("usuarios")[1], id: "u-carlos", nick: "carlos", nombre: "Carlos", codigo: "CPX" });
+await ev(() => refreshDrivers().then(() => populateConductorSelect()));
+await ev(() => { stab("transp", document.querySelector('.step[data-step="transp"]')); }); await w(200);
+await page.selectOption("#fResp", "carlos"); await w(200);
+const carlosTxt = await ev(() => document.getElementById("fResp").selectedOptions[0]?.textContent);
+check("Un conductor activo se elige con normalidad, sin el aviso de «no disponible»", carlosTxt?.startsWith("Carlos") && !carlosTxt.includes("no disponible"), carlosTxt);
+
 check("Sin errores de JavaScript", errores.length === 0, errores.slice(0, 3).join(" | "));
 await browser.close(); srv.close(); fs.rmSync(COPIA, { recursive: true, force: true });
 console.log(fallos ? `\n${fallos} comprobación(es) fallida(s)` : "\nTodas las comprobaciones correctas");

@@ -21,6 +21,9 @@ export function sembrarBase(db, { malicioso = false, adminMustChange = false, ad
       u("y');window.__pwned=(window.__pwned||0)+5;('", "user", { nombre: "Apostrofo" }),
     );
     db.tables.registros.push(reg({ creado_por: P(10), conductor_nombre: P(11), conductor_codigo: P(12), observaciones: P(13) + "\n=HYPERLINK(\"http://evil\",\"x\")", irradiador: P(14), irradiador_nombre: P(15) }));
+    // Detalle de dosímetros y calibraciones con texto hostil (lote, hoja, observaciones, nombre del aparato)
+    db.tables.registros.push(reg({ creado_por: "ana", conductor_nombre: "Ana", dosimetros: 2, calibracion_nombre: P(70), dosimetros_detalle: { observaciones: P(71), items: [{ lote: P(72), hoja: P(73), leido: true }, { lote: '"><svg onload="window.__pwned=(window.__pwned||0)+74">', hoja: P(75), leido: false }] } }));
+    db.tables.calibraciones_irradiacion = [{ id: crypto.randomUUID(), nombre: P(76), fecha_referencia: "2027-01-01", tasa_gy_h: 700, activa: false, created_at: AHORA() }];
     db.tables.vehiculos.push({ id: crypto.randomUUID(), matricula: P(20), numero_obra: P(21), activo: true, creado_por: "ana", created_at: AHORA() });
     db.tables.estaciones_servicio.push({ id: crypto.randomUUID(), nombre: P(30), activo: true, creado_por: "ana", created_at: AHORA() });
     db.tables.irradiadores.push({ id: crypto.randomUUID(), nombre: P(40), apellido1: P(41), apellido2: "", codigo: "IRX", activo: true, created_at: AHORA() });

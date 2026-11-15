@@ -402,3 +402,27 @@ alter table auditoria enable row level security;
 -- por eso se guardan por dosímetro, no uno solo para todo el registro.
 -- Estructura: {"observaciones": "...", "items": [{"lote":"...", "hoja":"...", "leido":true}, ...]}
 alter table registros add column if not exists dosimetros_detalle jsonb;
+
+-- ── Calibraciones de irradiación (varios aparatos, cada uno con su propia tasa) ──
+-- Hasta ahora la tasa de emisión (Gy/s en una fecha de referencia, con la que se calcula el tiempo
+-- de exposición) estaba fija en el código, pensada para un único aparato. Esta tabla permite dar de
+-- alta OTROS aparatos, cada uno con su propia fecha de referencia y su tasa (introducida en Gy/h,
+-- que es como suele venir en la ficha del fabricante; la app la convierte a Gy/s para calcular).
+-- El aparato "de fábrica" (el que ya usaba la app) NO está aquí — vive en el propio código como
+-- opción siempre disponible — así que esta tabla puede estar vacía sin que nada deje de funcionar.
+-- Como mucho una fila tiene activa=true a la vez (lo controla la propia API al activar otra).
+create table if not exists calibraciones_irradiacion (
+  id               uuid primary key default gen_random_uuid(),
+  nombre           text not null,
+  fecha_referencia date not null,
+  tasa_gy_h        numeric not null,
+  activa           boolean not null default false,
+  creado_por       text,
+  created_at       timestamptz not null default now()
+);
+create index if not exists calibraciones_irradiacion_activa_idx on calibraciones_irradiacion (activa) where activa;
+alter table calibraciones_irradiacion enable row level security;
+
+-- Qué calibración se usó al calcular cada registro (texto suelto: así el histórico no cambia si la
+-- calibración se renombra o se borra más adelante). null = el aparato de fábrica.
+alter table registros add column if not exists calibracion_nombre text;

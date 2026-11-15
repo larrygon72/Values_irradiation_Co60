@@ -115,6 +115,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 22V5a2 2 0 012-2h8a2 2 0 012 2v17M3 22h12M8 10h2M14 8l3 3v6a1.5 1.5 0 003 0v-4l-2-2"/></svg>
         <span>Estaciones</span>
       </button>
+      <button class="sidebar-link" data-nav="calibraciones" onclick="go('calibraciones')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/><path d="M12 3v2M21 12h-2M12 21v-2M3 12h2"/></svg>
+        <span>Calibraciones</span>
+      </button>
     </div>
   </nav>
   <div class="sidebar-foot">
@@ -150,6 +154,9 @@
     <div class="mhd"><b>🔬 Detalle de dosímetros</b><button class="x" onclick="closeDosDetalle()">✕</button></div>
     <div class="mbdy">
       <p class="thhint" style="margin:0 0 12px">El lote y la hoja se copian del dosímetro anterior — cámbialos solo en el que corresponda si varían a mitad de la serie. «Leído» es independiente en cada uno.</p>
+      <label class="dos-item-leido dos-leido-todos">
+        <input type="checkbox" id="dosLeidoTodos" onchange="onDosLeidoTodos(this.checked)"> Marcar todos como leídos
+      </label>
       <div id="dosItemsBox"></div>
       <div class="fl" style="margin-top:14px">
         <label>Observaciones</label>
@@ -508,6 +515,7 @@
         <div class="fl auto-fl"><label>⚙ Tasa Gy/s</label>
           <div class="cfr"><input type="text" id="tasa" readonly placeholder="—"><span class="aut">auto</span></div>
           <span class="fhint">Se calcula sola con la dosis y el tiempo de exposición.</span>
+          <span class="fhint" id="tasaCalibHint"></span>
         </div>
       </div>
 
@@ -911,6 +919,12 @@
       </div>
     </div>
     <div class="ssc">
+      <h3>Calibración activa</h3>
+      <p class="thhint">Aparato de irradiación con el que se calcula ahora el tiempo de exposición.</p>
+      <div class="dos-resumen" id="ajCalibracionActiva" style="display:block;margin:0 0 10px"></div>
+      <button class="btn bo bs" id="ajCalibracionBtn" style="display:none" onclick="go('calibraciones')">Gestionar calibraciones</button>
+    </div>
+    <div class="ssc">
       <h3>Dosis activa</h3>
       <p class="thhint">Es la dosis (Gy) que usan los cálculos de tiempo. Se guarda solo en este dispositivo.</p>
       <div class="fl"><label>Dosis (Gy)</label>
@@ -948,7 +962,7 @@
           <li>Pulsa <b>Nuevo registro</b> (o <b>Nuevo</b> abajo en el móvil).</li>
           <li>Recorre los pasos: <b>Datos</b> (fecha y urnas) → <b>Transporte</b> → <b>Temperatura</b> → <b>Irradiación</b> → <b>Obs.</b> Los campos con ⚙ se calculan solos.</li>
           <li>Pulsa <b>Guardar</b>. Solo la <b>fecha de irradiación</b> es obligatoria: el resto puede completarse más tarde.</li>
-          <li>En <b>Irradiación</b>, junto a «Dosímetros», el botón <b>🔬 Lote, hoja y lectura</b> abre el detalle de cada dosímetro: lote y hoja se copian del anterior (cámbialos solo donde varíen a mitad de la serie); «Leído» es independiente en cada uno; las observaciones son generales, con «Nada reseñable» por defecto.</li>
+          <li>En <b>Irradiación</b>, junto a «Dosímetros», el botón <b>🔬 Lote, hoja y lectura</b> abre el detalle de cada dosímetro: lote y hoja se copian del anterior (cámbialos solo donde varíen a mitad de la serie); «Leído» es independiente en cada uno (y hay una casilla para marcarlos todos de golpe); las observaciones son generales, con «Nada reseñable» por defecto. Todo ello se guarda con el registro y se ve en su ficha del Historial.</li>
           <li>Para corregir un registro: <b>Historial</b> → toca el registro → <b>Editar</b>. Solo puedes editar y borrar los tuyos (un administrador puede con todos).</li>
         </ul>
       </details>
@@ -981,6 +995,14 @@
         <ul class="help-list">
           <li>Registra <b>viajes</b> (km inicial y final) y <b>repostajes</b>. El km inicial se rellena solo con el último km final del vehículo.</li>
           <li>Si tu vehículo o estación no aparece, elige <b>+ Añadir…</b> al final del desplegable.</li>
+        </ul>
+      </details>
+      <details class="help-det">
+        <summary>Aparatos de irradiación (calibraciones)</summary>
+        <ul class="help-list">
+          <li>El tiempo de exposición se calcula con la tasa de emisión del aparato <b>en uso</b> en su fecha de referencia (y la desintegración del Co-60). En <b>Ajustes → Calibración activa</b> ves cuál es.</li>
+          <li>Un <b>administrador</b> puede dar de alta otro aparato en <b>Calibraciones</b> (nombre, fecha de referencia y tasa en <b>Gy/h</b>; la app la pasa a Gy/s sola) y elegir cuál está en uso. El <b>aparato original</b> está siempre disponible para volver a él.</li>
+          <li>Cambiar de aparato solo afecta a los registros <b>nuevos</b>: los ya guardados conservan su tasa y sus tiempos, y la ficha dice con qué aparato se calcularon. Si editas uno antiguo, sus números no cambian salvo que cambies la fecha.</li>
         </ul>
       </details>
       <details class="help-det">
@@ -1078,6 +1100,30 @@
 </div>
 
 <!-- ══════════ ESTACIONES DE SERVICIO (administración) ══════════ -->
+<!-- ══════════ CALIBRACIONES (aparatos de irradiación) ══════════ -->
+<div class="sc" id="scalibraciones">
+  <div class="tb">
+    <button class="back" onclick="go('menu')">← Volver</button>
+    <h1>Calibraciones</h1>
+  </div>
+  <div class="sa" style="display:flex;flex-direction:column;gap:16px">
+    <p class="thhint" style="margin:0">Cada aparato de irradiación tiene su propia tasa de emisión en una fecha de referencia (la de su calibración). La app la usa, junto con la desintegración del Co-60, para calcular el tiempo de exposición. Aquí puedes dar de alta otro aparato y elegir cuál está en uso; el aparato original queda siempre disponible para volver a él.</p>
+    <div class="ssc">
+      <h3>Dar de alta un aparato</h3>
+      <div class="fl"><label for="calNombre">Nombre</label><input type="text" id="calNombre" placeholder="Ej. Aparato nuevo 2027" maxlength="80"></div>
+      <div class="fr2">
+        <div class="fl"><label for="calFecha">Fecha de referencia</label><input type="date" id="calFecha"></div>
+        <div class="fl"><label for="calTasa">Tasa en esa fecha (Gy/h)</label><input type="number" id="calTasa" step="any" min="0" placeholder="Ej. 994.38" oninput="actualizarConversionCalib()"></div>
+      </div>
+      <span class="fhint" id="calConversion">Se convierte sola a Gy/s para calcular.</span>
+      <button class="btn bp bw" style="margin-top:10px" onclick="addCalibracion()">Añadir aparato</button>
+      <hr class="xdiv">
+      <div id="calList"></div>
+      <div class="lft" id="calSyncNote" style="margin-top:6px"></div>
+    </div>
+  </div>
+</div>
+
 <div class="sc" id="sestaciones">
   <div class="tb">
     <button class="back" onclick="go('menu')">← Volver</button>
@@ -1284,6 +1330,7 @@
   <button class="drawer-link" id="drawerIrradiadoresLink" data-nav="irradiadores" onclick="go('irradiadores')" style="display:none">Irradiadores</button>
   <button class="drawer-link" id="drawerVehiculosLink" data-nav="vehiculos" onclick="go('vehiculos')" style="display:none">Vehículos</button>
   <button class="drawer-link" id="drawerEstacionesLink" data-nav="estaciones" onclick="go('estaciones')" style="display:none">Estaciones</button>
+  <button class="drawer-link" id="drawerCalibracionesLink" data-nav="calibraciones" onclick="go('calibraciones')" style="display:none">Calibraciones</button>
   <button class="drawer-link" data-nav="settings" onclick="go('settings')">Ajustes</button>
   <hr class="xdiv">
   <button class="drawer-link" style="color:var(--red-l)" onclick="confirmLogout()">Cerrar sesión</button>

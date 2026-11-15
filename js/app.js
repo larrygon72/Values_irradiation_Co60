@@ -3,15 +3,31 @@
 // ════════════════════════════════════════════════════
 
 // ── PHYSICS Co-60 ────────────────────────────────────
-const REF   = new Date(2024, 9, 16);
-const RR    = 0.27621757;
+// LAM (la constante de desintegración) es propia del Co-60 — de eso no cambia nada. Lo que SÍ puede
+// cambiar con el tiempo es CON QUÉ APARATO se irradia: cada uno tiene su propia tasa de emisión en
+// una fecha de referencia (la de su calibración). Antes esos dos valores (REF, RR) eran fijos; ahora
+// son los de una "calibración activa" que se puede cambiar — ver CALIBRACION_ORIGINAL más abajo y
+// api/calibraciones.js. rate()/tExp() se quedan exactamente igual que antes: lo único que cambia es
+// de dónde sacan la fecha y la tasa.
 const LAM   = Math.LN2 / (5.271 * 365.25);
 const msDay = 86400000;
 // Texto por defecto de las observaciones del detalle de dosímetros (se usa en la inicialización
 // del estado S, más abajo, por eso va declarado aquí arriba).
 const DOS_OBS_DEFECTO='Nada reseñable';
 
-function rate(d)    { return RR * Math.exp(-LAM * (d - REF) / msDay); }
+// El aparato "de fábrica": la fecha y la tasa que ya usaba la app antes de que existiera esta
+// pantalla. No es una fila de la base de datos — vive aquí, siempre disponible, para poder "volver
+// a estos valores en cualquier momento" aunque se dé de alta otro aparato más adelante. tasaGyS va
+// en Gy/s directamente (como ya estaba) para que no haya ni una operación de más con este valor.
+const CALIBRACION_ORIGINAL = { id:null, nombre:'Aparato original (calibración de fábrica)', fechaReferencia:new Date(2024,9,16), tasaGyS:0.27621757, original:true };
+let _calibracionActiva = CALIBRACION_ORIGINAL;
+function calibracionActiva() { return _calibracionActiva; }
+// Gy/s de una calibración: directo si ya viene en esa unidad (el aparato de fábrica), o convertido
+// desde Gy/h (como se introducen los aparatos nuevos, que es como suelen venir en su ficha técnica).
+function calibTasaGyS(c) { return c.tasaGyS!=null ? c.tasaGyS : (c.tasaGyH||0)/3600; }
+function aplicarCalibracion(c) { _calibracionActiva = c || CALIBRACION_ORIGINAL; }
+
+function rate(d)    { const c=_calibracionActiva; return calibTasaGyS(c) * Math.exp(-LAM * (d - c.fechaReferencia) / msDay); }
 function tExp(gy,d) { const r=rate(d); return r>0 ? gy/r : 0; }
 function miercolesDeLaSemana(d) {
   const dt=new Date(d); dt.setHours(0,0,0,0);
@@ -35,7 +51,7 @@ function pd(s)  { if(!s) return null; const[y,m,d]=s.split('-').map(Number); ret
 function tod(d) { if(!d) return ''; return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 
 // ── Versión y ajustes generales ───────────────────────
-const APP_VERSION = '2.0';
+const APP_VERSION = '2.1';
 const RESTAURAR_SESION = true;   // al reabrir la app, seguir dentro si el token (12 h) sigue vigente
 
 // ── SEGURIDAD: escape de HTML ─────────────────────────
@@ -90,6 +106,7 @@ const S = {
   urna2:{n:'',date:'',lote:''},
   urna3:{n:'',date:'',lote:''},
   dosDetalle:{observaciones:DOS_OBS_DEFECTO,items:[]},
+  calibForm:null,   // nombre de la calibración con la que se calcularon tasa/tiempos del formulario (null = aún ninguna)
   md:[0,0,0,0,0,0],
   exCtx:'form',
   histVista:'lista', histRaw:[], histFiltered:[],
@@ -122,6 +139,8 @@ const LS = {
   setDriverCache(d){ localStorage.setItem('vi_drivers',JSON.stringify(d||[])) },
   irradiadorCache() { try{return JSON.parse(localStorage.getItem('vi_irr')||'[]')}catch{return []} },
   setIrradiadorCache(d){ localStorage.setItem('vi_irr',JSON.stringify(d||[])) },
+  calibracionCache() { try{return JSON.parse(localStorage.getItem('vi_calib')||'[]')}catch{return []} },
+  setCalibracionCache(d){ localStorage.setItem('vi_calib',JSON.stringify(d||[])) },
   vehiculoCache() { try{return JSON.parse(localStorage.getItem('vi_veh')||'[]')}catch{return []} },
   setVehiculoCache(d){ localStorage.setItem('vi_veh',JSON.stringify(d||[])) },
   estacionCache() { try{return JSON.parse(localStorage.getItem('vi_est')||'[]')}catch{return []} },
@@ -228,21 +247,86 @@ function populateConductorSelect(drivers) {
   if (!sel) return;
   const list = drivers || LS.driverCache();
   const current = sel.value;
+  const previa = sel.querySelector(`option[value="${CSS.escape(current||'\u0000')}"]`);
   sel.innerHTML = '<option value="">— Selecciona conductor —</option>' +
     list.map(u => {
       const nombreCompleto = [u.nombre,u.apellido1,u.apellido2].filter(Boolean).join(' ') || u.nick;
       return `<option value="${esc(u.nick)}">${esc(nombreCompleto)}</option>`;
     }).join('');
-  if (list.some(u => u.nick === current)) sel.value = current;
+  // Si el conductor seleccionado ya no está en la lista (usuario borrado, o — al editar un registro
+  // antiguo — alguien que entonces existía), se conserva la opción que ya hubiera en vez de perderla:
+  // la primera vez la trae cargarRegistroEnFormulario() con el nombre/código guardados en el propio
+  // registro; en reconstrucciones posteriores se reutiliza esa misma opción, así que el texto nunca
+  // se "ensucia" aunque esta función se llame varias veces seguidas.
+  asegurarOpcionHistorica(sel, current, previa);
   onConductorChange();
+}
+// Si el valor que debería ir seleccionado no está entre las opciones (usuario borrado, irradiador
+// desactivado…), se añade de vuelta como una opción extra en vez de dejar el desplegable en blanco
+// — así un registro antiguo sigue mostrando a quién o qué se refería. "previa" es la opción (de
+// antes de reconstruir la lista) que representaba ese valor, si la había — se reaprovecha tal cual
+// (con sus "dataset") para que repetir esta función no vaya empeorando el texto poco a poco.
+function asegurarOpcionHistorica(sel, valor, previa) {
+  if (!valor || sel.querySelector(`option[value="${CSS.escape(valor)}"]`)) { if(valor) sel.value=valor; return; }
+  const op = previa ? previa.cloneNode(true) : document.createElement('option');
+  op.value = valor; // una <option> sin "value" toma su texto como valor — hay que fijarlo siempre,
+                     // tanto si "op" es nueva como si viene clonada de opcionConDatos() (que no lo trae).
+  if (!previa) op.textContent = valor + ' (ya no disponible)';
+  else if (!op.dataset.historico) op.textContent = op.textContent + ' (ya no disponible)';
+  op.dataset.historico = '1';
+  sel.appendChild(op);
+  sel.value = valor;
 }
 function onConductorChange() {
   const sel = document.getElementById('fResp');
   const codEl = document.getElementById('fRespCod');
   if (!sel || !codEl) return;
   const u = LS.driverCache().find(x => x.nick === sel.value);
-  codEl.value = u ? (u.codigo || codigoConductor(u.nombre,u.apellido1,u.apellido2)) : '';
+  const opt = sel.selectedOptions[0];
+  // Si ya no está en la lista activa, se usa el código que trajera la opción histórica (puesto por
+  // cargarRegistroEnFormulario con el código que se guardó en su momento), no uno recalculado.
+  codEl.value = u ? (u.codigo || codigoConductor(u.nombre,u.apellido1,u.apellido2)) : (opt?.dataset.codigo || '');
   if(typeof updateStepperStatus==='function') updateStepperStatus();
+}
+
+// ── Calibración activa (aparato de irradiación en uso) ──
+// Se aplica SIEMPRE primero desde la copia guardada en el dispositivo (así, sin conexión, los
+// cálculos siguen usando el aparato correcto en vez de volver en silencio al de fábrica — lo que
+// daría tiempos de exposición distintos sin avisar) y luego se refresca desde el servidor.
+function aplicarCalibracionActivaDesdeCache() {
+  const fila=LS.calibracionCache().find(c=>c.activa);
+  aplicarCalibracion(fila ? { id:fila.id, nombre:fila.nombre, fechaReferencia:pd(fila.fecha_referencia), tasaGyH:Number(fila.tasa_gy_h) } : null);
+  actualizarIndicadorCalibracion();
+}
+async function refreshCalibraciones() {
+  try {
+    const data = await apiPost('/calibraciones', { action:'listPublic', token: LS.token() });
+    LS.setCalibracionCache(data.calibraciones || []);
+    setCloudState('ok');
+  } catch (e) {
+    setCloudState(e.isNetwork ? 'off' : 'err');
+  }
+  aplicarCalibracionActivaDesdeCache();
+  return LS.calibracionCache();
+}
+// Texto "Calibración: …" bajo la tasa del formulario y en Ajustes — para que quien registra vea
+// con qué aparato se está calculando, no un ajuste oculto que cambia los números sin decir nada.
+function textoCalibracionActiva() {
+  const c=calibracionActiva();
+  const gyh=(calibTasaGyS(c)*3600);
+  return `${c.nombre} · ref. ${fmt(c.fechaReferencia)} · ${gyh.toLocaleString('es-ES',{maximumFractionDigits:4})} Gy/h`;
+}
+function actualizarIndicadorCalibracion() {
+  const hint=document.getElementById('tasaCalibHint');
+  if(hint){
+    const activa=calibracionActiva().nombre, usada=S.calibForm||activa;
+    // Al editar un registro antiguo, tasa y tiempos son los que se guardaron entonces — con OTRO
+    // aparato, si desde entonces se cambió la calibración activa. Se avisa para que no confunda.
+    hint.textContent = usada===activa ? 'Calibración: '+textoCalibracionActiva()
+      : `Calculado con «${usada}» (ahora la activa es «${activa}»). Si cambias la fecha se recalcula con la activa.`;
+  }
+  const aj=document.getElementById('ajCalibracionActiva');
+  if(aj) aj.textContent=textoCalibracionActiva();
 }
 
 // ── Desplegable de irradiadores (operadores) ─────────
@@ -261,12 +345,13 @@ function populateIrradiadorSelect(list) {
   if (!sel) return;
   const items = list || LS.irradiadorCache();
   const current = sel.value;
+  const previa = sel.querySelector(`option[value="${CSS.escape(current||'\u0000')}"]`);
   sel.innerHTML = '<option value="">— Selecciona irradiador —</option>' +
     items.map(u => {
       const nombreCompleto = [u.nombre,u.apellido1,u.apellido2].filter(Boolean).join(' ') || '—';
       return `<option value="${esc(u.id)}">${esc(nombreCompleto)}</option>`;
     }).join('');
-  if (items.some(u => u.id === current)) sel.value = current;
+  asegurarOpcionHistorica(sel, current, previa);
   onIrradiadorChange();
 }
 function onIrradiadorChange() {
@@ -274,7 +359,10 @@ function onIrradiadorChange() {
   const hid=document.getElementById('fIrr');
   if(!sel||!hid) return;
   const u=LS.irradiadorCache().find(x=>x.id===sel.value);
-  hid.value = u ? [u.nombre,u.apellido1,u.apellido2].filter(Boolean).join(' ') : '';
+  const opt=sel.selectedOptions[0];
+  // Si ya no está en la lista activa (p. ej. lo desactivó un admin), se usa el nombre que trajera la
+  // opción histórica en vez de dejarlo en blanco (antes "desaparecía" el irradiador al editar).
+  hid.value = u ? [u.nombre,u.apellido1,u.apellido2].filter(Boolean).join(' ') : (opt?.dataset.nombre || '');
   if(typeof updateStepperStatus==='function') updateStepperStatus();
 }
 
@@ -629,6 +717,7 @@ function boot() {
   // contraseña de fábrica. Se elimina; para entrar sin conexión ahora se usa un hash (ver más abajo).
   try{ localStorage.removeItem('vi_u'); }catch{}
   S.dose=LS.dose(); S.staged=LS.staged(); S.md=LS.md();
+  aplicarCalibracionActivaDesdeCache();
   applyTheme(LS.themePref());
   updStagedUI();
   setCloudState(null);
@@ -668,8 +757,9 @@ function go(id) {
     iniciarFiltrosInforme();
     actualizarBotonesOrientacionInforme();
   }
-  if(id==='form')       { populateConductorSelect(); refreshDrivers().then(populateConductorSelect); populateIrradiadorSelect(); refreshIrradiadores().then(populateIrradiadorSelect); renderUrnaCards(); updateStepperStatus(); }
+  if(id==='form')       { populateConductorSelect(); refreshDrivers().then(populateConductorSelect); populateIrradiadorSelect(); refreshIrradiadores().then(populateIrradiadorSelect); refreshCalibraciones(); actualizarIndicadorCalibracion(); renderUrnaCards(); updateStepperStatus(); }
   if(id==='irradiadores') renderIrradiadoresScreen();
+  if(id==='calibraciones') renderCalibracionesScreen();
   if(id==='vehiculos')    renderVehiculosScreen();
   if(id==='estaciones')   renderEstacionesScreen();
   if(id==='conduccion')   {
@@ -696,6 +786,8 @@ function go(id) {
   document.getElementById('drawerIrradiadoresLink').style.display=S.isAdmin?'block':'none';
   document.getElementById('drawerVehiculosLink').style.display=S.isAdmin?'block':'none';
   document.getElementById('drawerEstacionesLink').style.display=S.isAdmin?'block':'none';
+  document.getElementById('drawerCalibracionesLink').style.display=S.isAdmin?'block':'none';
+  const ajCalBtn=document.getElementById('ajCalibracionBtn'); if(ajCalBtn) ajCalBtn.style.display=S.isAdmin?'inline-flex':'none';
   closeDrawer();
 }
 function nuevoRegistro() {
@@ -893,6 +985,7 @@ function onAuthSuccess(usuario, token, opts) {
   go(opts&&opts.restaurada?'menu':'welcome2');
   flushPending();
   refreshDrivers().then(()=>populateConductorSelect());
+  refreshCalibraciones();
   startNotifPolling();
   if(usuario.mustChangePassword) abrirCambioPass(true);
 }
@@ -1149,6 +1242,8 @@ function onFecha() {
   document.getElementById('fTexp').value=r>0?(S.dose/r).toFixed(1):'';
   const rw=rate(miercolesDeLaSemana(d));
   document.getElementById('fTexpReal').value=rw>0?(S.dose/rw).toFixed(1):'';
+  S.calibForm=calibracionActiva().nombre;   // estos números son de la calibración activa ahora
+  actualizarIndicadorCalibracion();
   updateStepperStatus();
 }
 function calcTm() {
@@ -1343,8 +1438,24 @@ function openDosDetalle() {
   if(n<=0){ toast('Indica primero cuántos dosímetros son'); return; }
   sincronizarDosItems(n);
   renderDosItems();
+  actualizarCheckMaestroDos();
   document.getElementById('dosObs').value=S.dosDetalle.observaciones||'';
   document.getElementById('dosModal').classList.add('on');
+}
+// Casilla "Marcar todos como leídos": marcada si TODOS lo están, sin marcar si ninguno, y en un
+// estado intermedio (indeterminate) si hay una mezcla — el patrón habitual de "seleccionar todos".
+function actualizarCheckMaestroDos() {
+  const chk=document.getElementById('dosLeidoTodos'); if(!chk) return;
+  const items=S.dosDetalle.items;
+  const leidos=items.filter(it=>it.leido).length;
+  chk.checked=items.length>0 && leidos===items.length;
+  chk.indeterminate=leidos>0 && leidos<items.length;
+}
+// Marca o desmarca TODOS de golpe; el usuario puede luego desmarcar (o marcar) uno suelto a mano.
+function onDosLeidoTodos(marcado) {
+  S.dosDetalle.items.forEach(it=>{ it.leido=marcado; });
+  document.querySelectorAll('#dosItemsBox .dos-item-leido input[type=checkbox]').forEach(cb=>{ cb.checked=marcado; });
+  actualizarCheckMaestroDos();
 }
 function closeDosDetalle() {
   document.getElementById('dosModal').classList.remove('on');
@@ -1379,7 +1490,7 @@ function onDosItemInput(i, campo, valor) {
     j++;
   }
 }
-function onDosItemLeido(i, marcado) { if(S.dosDetalle.items[i]) S.dosDetalle.items[i].leido=marcado; }
+function onDosItemLeido(i, marcado) { if(S.dosDetalle.items[i]) S.dosDetalle.items[i].leido=marcado; actualizarCheckMaestroDos(); }
 function onDosObsInput() { S.dosDetalle.observaciones=document.getElementById('dosObs').value; }
 function actualizarResumenDos() {
   const el=document.getElementById('dosResumen');
@@ -1442,8 +1553,18 @@ function validarFormularioRegistro() {
   }
   return true;
 }
+// Si después de rellenar el detalle se cambió el nº de dosímetros (o cambió solo, al tocar las urnas),
+// el detalle que se guarda se ajusta a ese nº — recortando las filas que sobran o añadiendo las que
+// faltan con el lote/hoja del último — para que "Nº dosímetros" y los totales por lote/hoja cuadren.
+function ajustarDosDetalleAlNumero() {
+  const n=parseInt(document.getElementById('fDos').value,10)||0;
+  if(!S.dosDetalle.items.length) return;
+  if(n>0) sincronizarDosItems(n); else S.dosDetalle.items=[];
+  actualizarResumenDos();
+}
 async function guardar() {
   if(!validarFormularioRegistro()) return;
+  ajustarDosDetalleAlNumero();
   const t=urnaTotal();
   const tiV=parseFloat(document.getElementById('fTi').value);
   const tfV=parseFloat(document.getElementById('fTf').value);
@@ -1479,6 +1600,7 @@ async function guardar() {
     nUrnas: t||'',
     u1:{...S.urna1}, u2:{...S.urna2}, u3:{...S.urna3},
     dosDetalle:{observaciones:S.dosDetalle.observaciones, items:S.dosDetalle.items.map(it=>({...it}))},
+    calibNombre:(S.calibForm&&S.calibForm!==CALIBRACION_ORIGINAL.nombre)?S.calibForm:'',
     // Calculados automáticamente
     semana: document.getElementById('semana').value,
     tasa:   document.getElementById('tasa').value,
@@ -1532,6 +1654,7 @@ function limpiarForm() {
   renderUrnaCards();
   S.dosDetalle={observaciones:DOS_OBS_DEFECTO,items:[]};
   actualizarResumenDos();
+  S.calibForm=null; actualizarIndicadorCalibracion();
   stab('urnas', document.querySelector('.step[data-step="urnas"]'));
 }
 // Los registros guardados en este dispositivo solo los ve quien los hizo (en equipos compartidos).
@@ -2000,6 +2123,21 @@ async function eliminarHistorialRegistro(id) {
 }
 
 // ── DETALLE DE REGISTRO ────────────────────────────────
+// Sección "Dosímetros" de la ficha de un registro: lote, hoja y lectura de cada uno, y las observaciones.
+// Si el registro no tiene detalle (los anteriores a esta pantalla, o sin rellenar), no se muestra nada.
+function dosDetalleHTML(r) {
+  const d=dosResumen(r);
+  const obs=r.dosimetros_detalle&&r.dosimetros_detalle.observaciones;
+  if(!d.items.length && !obs) return '';
+  const filas=d.items.map((it,i)=>`<tr><td>${i+1}</td><td>${esc(it.lote)||'—'}</td><td>${esc(it.hoja)||'—'}</td><td>${it.leido?'✓ Leído':'—'}</td></tr>`).join('');
+  return `
+    <div class="det-sect">
+      <div class="det-sect-hd">Dosímetros: lote, hoja y lectura</div>
+      <div style="font-size:13px;margin-bottom:8px"><b>${d.items.length}</b> detallados · <b>${d.leidos}</b> leído${d.leidos===1?'':'s'}</div>
+      ${d.items.length?`<div style="overflow-x:auto"><table class="dtbl"><thead><tr><th>Nº</th><th>Lote</th><th>Hoja</th><th>Lectura</th></tr></thead><tbody>${filas}</tbody></table></div>`:''}
+      ${obs?`<div class="det-obs" style="margin-top:8px">${esc(obs)}</div>`:''}
+    </div>`;
+}
 function abrirDetalleRegistro(id) {
   const r=(S.histRaw||[]).find(x=>x.id===id);
   if(!r) return;
@@ -2025,6 +2163,7 @@ function abrirDetalleRegistro(id) {
     <div class="det-sect">
       <div class="det-sect-hd">Datos de irradiación</div>
       <div class="det-grid">
+        ${item('Calibración (aparato)', r.calibracion_nombre||CALIBRACION_ORIGINAL.nombre)}
         ${item('Tasa (Gy/s)', r.tasa?parseFloat(r.tasa).toFixed(8):null)}
         ${item('Tiempo exp. teórico (s)', r.tiempo_exposicion)}
         ${item('Tiempo exp. real (s)', r.tiempo_exposicion_real)}
@@ -2035,6 +2174,7 @@ function abrirDetalleRegistro(id) {
         ${item('Exposición operador', r.exposicion_usv!=null?r.exposicion_usv+' µSv':null)}
       </div>
     </div>
+    ${dosDetalleHTML(r)}
     <div class="det-sect">
       <div class="det-sect-hd">Transporte</div>
       <div class="det-grid">
@@ -2061,10 +2201,21 @@ function abrirDetalleRegistro(id) {
 function cerrarDetalleRegistro() {
   document.getElementById('detOv').classList.remove('on');
 }
+// Opción "suelta" (sin añadir todavía a ningún <select>) con su texto y los datos extra que
+// onConductorChange()/onIrradiadorChange() necesiten si ese valor ya no está en la lista activa.
+function opcionConDatos(texto, dataset) {
+  const op=document.createElement('option');
+  op.textContent=texto; Object.entries(dataset||{}).forEach(([k,v])=>{ if(v) op.dataset[k]=v; });
+  return op;
+}
 function cargarRegistroEnFormulario(r) {
   document.getElementById('fchIrr').value=r.fecha_irradiacion||'';
   onFecha();
-  document.getElementById('fResp').value=r.conductor_nick||'';
+  // Si el conductor de este registro ya no está en la lista (usuario borrado, p. ej.), se rescata
+  // con el nombre y el código que se guardaron en su momento — antes el campo se quedaba en blanco
+  // al editar un registro antiguo, como si el conductor hubiera "desaparecido".
+  asegurarOpcionHistorica(document.getElementById('fResp'), r.conductor_nick||'',
+    r.conductor_nick?opcionConDatos(r.conductor_nombre||r.conductor_nick,{codigo:r.conductor_codigo}):null);
   onConductorChange();
   document.getElementById('fHII').value=r.h_ida_inicio||'';
   document.getElementById('fHIL').value=r.h_ida_llegada||'';
@@ -2073,8 +2224,18 @@ function cargarRegistroEnFormulario(r) {
   document.getElementById('fTi').value=r.temp_inicial??'';
   document.getElementById('fTf').value=r.temp_final??'';
   calcTm();
+  // onFecha() ya recalculó tasa y tiempos con la calibración activa AHORA; pero un registro guardado
+  // se hizo con la que hubiera entonces. Se restauran los valores guardados — así editar (o duplicar)
+  // un registro antiguo no cambia sus números en silencio aunque el aparato activo sea otro.
+  if(r.tasa!=null && r.tasa!=='') document.getElementById('tasa').value=parseFloat(r.tasa).toFixed(8);
+  if(r.tiempo_exposicion!=null && r.tiempo_exposicion!=='') document.getElementById('fTexp').value=parseFloat(r.tiempo_exposicion).toFixed(1);
+  if(r.tiempo_exposicion_real!=null && r.tiempo_exposicion_real!=='') document.getElementById('fTexpReal').value=parseFloat(r.tiempo_exposicion_real).toFixed(1);
+  S.calibForm=r.calibracion_nombre||CALIBRACION_ORIGINAL.nombre;
+  actualizarIndicadorCalibracion();
+  // Mismo caso con el irradiador (era justo el que se reportó "desapareciendo" al editar).
   const irrSel=document.getElementById('fIrrSel');
-  if(irrSel) irrSel.value=r.irradiador_id||'';
+  if(irrSel) asegurarOpcionHistorica(irrSel, r.irradiador_id||'',
+    r.irradiador_id?opcionConDatos(r.irradiador_nombre||'(sin nombre guardado)',{nombre:r.irradiador_nombre}):null);
   onIrradiadorChange();
   document.getElementById('fExpUsv').value=r.exposicion_usv??'';
   document.getElementById('fDos').value=r.dosimetros??'';
@@ -2218,7 +2379,8 @@ function buildHistRows(regs) {
   const header=['Fecha Irradiación','Semana ISO','Guardado por','Conductor','Código','Tasa Gy/s',
     'Tiempo Exp. Teórico(s)','Tiempo Exp. Real(s)','Nº Urnas','Dosímetros',
     'H.Ida Ini','H.Ida Lle','H.Vta Ini','H.Vta Lle','Tª Ini(°C)','Tª Fin(°C)','Tª Media(°C)',
-    'Irradiador','Código Irr.','H.Ini Irr.','H.Fin Irr.','Exposición(µSv)','Observaciones'];
+    'Irradiador','Código Irr.','H.Ini Irr.','H.Fin Irr.','Exposición(µSv)','Observaciones',
+    'Calibración','Dosím. leídos','Lotes dosím.','Hojas dosím.','Obs. dosímetros'];
   const rows=regs.map(r=>[
     r.fecha_irradiacion?fmt(pd(r.fecha_irradiacion)):'',
     r.semana_iso||'', r.creado_por||'', r.conductor_nombre||'', r.conductor_codigo||'',
@@ -2227,7 +2389,9 @@ function buildHistRows(regs) {
     r.h_ida_inicio||'', r.h_ida_llegada||'', r.h_vuelta_inicio||'', r.h_vuelta_llegada||'',
     r.temp_inicial||'', r.temp_final||'', r.temp_media||'',
     r.irradiador_nombre||r.irradiador||'', r.irradiador_codigo||'', r.h_inicio_irr||'', r.h_fin_irr||'',
-    r.exposicion_usv||'', r.observaciones||''
+    r.exposicion_usv||'', r.observaciones||'',
+    r.calibracion_nombre||CALIBRACION_ORIGINAL.nombre, dosResumen(r).leidos, dosResumen(r).lotes, dosResumen(r).hojas,
+    (r.dosimetros_detalle&&r.dosimetros_detalle.observaciones)||''
   ]);
   return {header,rows};
 }
@@ -2352,6 +2516,7 @@ const CAMPOS_INFORME=[
   {id:'tempMedia',    label:'Temperatura media (°C)',    grupo:'Temperatura', get:r=>r.temp_media??''},
   {id:'irradiador',   label:'Irradiador',                grupo:'Irradiación', get:r=>r.irradiador_nombre||r.irradiador||''},
   {id:'irradiadorCod',label:'Código irradiador',         grupo:'Irradiación', get:r=>r.irradiador_codigo||''},
+  {id:'calibracion',  label:'Calibración (aparato)',     grupo:'Irradiación', get:r=>r.calibracion_nombre||CALIBRACION_ORIGINAL.nombre},
   {id:'tasa',         label:'Tasa (Gy/s)',               grupo:'Irradiación', get:r=>r.tasa?parseFloat(r.tasa).toFixed(8):''},
   {id:'texp',         label:'Tiempo exposición teórico (s)', grupo:'Irradiación', get:r=>r.tiempo_exposicion??'', sumable:true},
   {id:'texpReal',     label:'Tiempo exposición real (s)',    grupo:'Irradiación', get:r=>r.tiempo_exposicion_real??'', sumable:true},
@@ -3141,6 +3306,7 @@ function clearMD(){S.md=[0,0,0,0,0,0];LS.setMD(S.md);renderMD();toast('Entradas 
 
 // ── SETTINGS ──────────────────────────────────────────
 function renderSettings() {
+  actualizarIndicadorCalibracion();
   applyTheme(LS.themePref());
   document.getElementById('sdose').value=S.dose;
   actualizarEstadoNotifUI();
@@ -3326,6 +3492,132 @@ async function unlock(nick) {
 }
 
 // ── GESTIÓN DE IRRADIADORES (operadores) ───────────────
+// ── ADMINISTRACIÓN DE CALIBRACIONES (aparatos de irradiación) ──
+// Cambiar la calibración activa cambia el cálculo de dosis/tiempos de TODA la app para TODOS los
+// usuarios, por eso es solo de administradores. El aparato original (el de siempre) no es una fila
+// de la base de datos: sale siempre el primero, no se edita ni se borra, y sirve para volver atrás.
+let editCalibId=null;
+function actualizarConversionCalib() {
+  const gyh=parseFloat(document.getElementById('calTasa').value);
+  const el=document.getElementById('calConversion');
+  el.textContent = gyh>0 ? `= ${(gyh/3600).toLocaleString('es-ES',{maximumFractionDigits:8})} Gy/s (es lo que usa la app para calcular)` : 'Se convierte sola a Gy/s para calcular.';
+}
+async function renderCalibracionesScreen() {
+  if(!S.isAdmin){ go('menu'); toast('Solo un administrador puede ver esta pantalla'); return; }
+  const box=document.getElementById('calList');
+  const note=document.getElementById('calSyncNote');
+  let filas=[], enNube=true;
+  try{
+    const data=await apiPost('/calibraciones',{action:'listPublic',token:LS.token()});
+    filas=data.calibraciones||[];
+    LS.setCalibracionCache(filas);
+    aplicarCalibracionActivaDesdeCache();
+    setCloudState('ok');
+  }catch(e){
+    enNube=false;
+    setCloudState(e.isNetwork?'off':'err');
+    filas=LS.calibracionCache();
+  }
+  if(note) note.textContent=enNube?'':'⚠ Mostrando la última lista descargada (sin conexión con la nube).';
+  const hayActivaEnBD=filas.some(f=>f.activa);
+  const fila=(nombre,detalle,activa,acciones)=>`
+    <div class="cal-fila" style="display:flex;align-items:center;gap:8px;padding:10px 0;border-top:1px solid var(--brd);font-size:13px;flex-wrap:wrap">
+      <span style="flex:1;min-width:160px"><b>${esc(nombre)}</b>${activa?' <span class="cloudbdg ok" style="margin-left:6px">en uso</span>':''}
+        <br><span style="color:var(--txt3);font-size:12px">${detalle}</span></span>
+      ${acciones}
+    </div>`;
+  const btn=(txt,onclick,cls)=>`<button class="btn ${cls||'bo'} bs" style="padding:3px 8px;font-size:11px" onclick="${onclick}">${txt}</button>`;
+  const orig=CALIBRACION_ORIGINAL;
+  let html=fila(orig.nombre,
+    `ref. ${esc(fmt(orig.fechaReferencia))} · ${(orig.tasaGyS*3600).toLocaleString('es-ES',{maximumFractionDigits:4})} Gy/h <span style="opacity:.8">(${orig.tasaGyS.toLocaleString('es-ES',{maximumFractionDigits:8})} Gy/s)</span> · siempre disponible`,
+    !hayActivaEnBD,
+    hayActivaEnBD?btn('Volver a usar este','activarCalibracionOriginal()','bp'):'');
+  html+=filas.map(f=>{
+    if(editCalibId===f.id) return filaCalibEdicion(f);
+    const gyh=Number(f.tasa_gy_h);
+    return fila(f.nombre,
+      `ref. ${esc(fmt(pd(f.fecha_referencia)))} · ${gyh.toLocaleString('es-ES',{maximumFractionDigits:4})} Gy/h <span style="opacity:.8">(${(gyh/3600).toLocaleString('es-ES',{maximumFractionDigits:8})} Gy/s)</span>`,
+      !!f.activa,
+      (f.activa?'':btn('Usar este',`activarCalibracion('${escJs(f.id)}')`,'bp'))+
+      btn('✏️ Editar',`editarCalibInicio('${escJs(f.id)}')`)+
+      (f.activa?'':btn('Eliminar',`delCalibracion('${escJs(f.id)}')`,'br')));
+  }).join('');
+  box.innerHTML=html;
+}
+function filaCalibEdicion(f) {
+  return `
+  <div style="padding:10px;margin-top:8px;border:1px solid var(--brd3);border-radius:10px;background:rgba(76,110,245,.06);display:flex;flex-direction:column;gap:10px">
+    <div style="font-weight:700;font-family:var(--fh)">Editando aparato</div>
+    <div class="fl"><label>Nombre</label><input type="text" id="eu_cal_nombre" value="${esc(f.nombre)}" maxlength="80"></div>
+    <div class="fr2">
+      <div class="fl"><label>Fecha de referencia</label><input type="date" id="eu_cal_fecha" value="${esc(f.fecha_referencia)}"></div>
+      <div class="fl"><label>Tasa (Gy/h)</label><input type="number" id="eu_cal_tasa" step="any" min="0" value="${esc(f.tasa_gy_h)}"></div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn bp bs" style="flex:1" onclick="editarCalibGuardar('${escJs(f.id)}')">Guardar cambios</button>
+      <button class="btn bo bs" onclick="editarCalibCancelar()">Cancelar</button>
+    </div>
+  </div>`;
+}
+function editarCalibInicio(id){ editCalibId=id; renderCalibracionesScreen(); }
+function editarCalibCancelar(){ editCalibId=null; renderCalibracionesScreen(); }
+async function editarCalibGuardar(id) {
+  const nombre=document.getElementById('eu_cal_nombre').value.trim();
+  const fechaReferencia=document.getElementById('eu_cal_fecha').value;
+  const tasaGyH=document.getElementById('eu_cal_tasa').value;
+  if(!nombre||!fechaReferencia||!(parseFloat(tasaGyH)>0)){ toast('Rellena nombre, fecha y una tasa mayor que cero'); return; }
+  try{
+    await apiPost('/calibraciones',{action:'editar',token:LS.token(),payload:{id,nombre,fechaReferencia,tasaGyH}});
+    setCloudState('ok'); toast('✓ Aparato actualizado');
+  }catch(e){ toast('⚠ '+e.message); return; }
+  editCalibId=null;
+  await renderCalibracionesScreen();
+}
+async function addCalibracion() {
+  const nombre=document.getElementById('calNombre').value.trim();
+  const fechaReferencia=document.getElementById('calFecha').value;
+  const tasaGyH=document.getElementById('calTasa').value;
+  if(!nombre||!fechaReferencia||!(parseFloat(tasaGyH)>0)){ toast('Rellena nombre, fecha de referencia y una tasa mayor que cero'); return; }
+  try{
+    await apiPost('/calibraciones',{action:'crear',token:LS.token(),payload:{nombre,fechaReferencia,tasaGyH}});
+    setCloudState('ok'); toast(`✓ Aparato "${nombre}" añadido (aún no está en uso)`);
+  }catch(e){ toast('⚠ '+(e.isNetwork?'Sin conexión: no se ha podido guardar':e.message)); return; }
+  ['calNombre','calFecha','calTasa'].forEach(id=>{document.getElementById(id).value='';});
+  actualizarConversionCalib();
+  await renderCalibracionesScreen();
+}
+// Activar otra calibración cambia los números de toda la app para todos: se pide confirmación.
+async function activarCalibracion(id) {
+  const ok=await confirmDialog('A partir de ahora, el tiempo de exposición de los registros NUEVOS se calculará con este aparato. Los registros ya guardados no cambian.',
+    {title:'Cambiar el aparato en uso',okText:'Usar este aparato'});
+  if(!ok) return;
+  try{
+    await apiPost('/calibraciones',{action:'activar',token:LS.token(),payload:{id}});
+    setCloudState('ok'); toast('✓ Aparato en uso cambiado');
+  }catch(e){ toast('⚠ '+(e.isNetwork?'Sin conexión: no se ha podido cambiar':e.message)); return; }
+  await renderCalibracionesScreen();
+}
+async function activarCalibracionOriginal() {
+  const ok=await confirmDialog('Se vuelve al aparato original, con los valores de siempre. Los registros ya guardados no cambian.',
+    {title:'Volver al aparato original',okText:'Volver al original'});
+  if(!ok) return;
+  try{
+    await apiPost('/calibraciones',{action:'activarOriginal',token:LS.token()});
+    setCloudState('ok'); toast('✓ Vuelves al aparato original');
+  }catch(e){ toast('⚠ '+(e.isNetwork?'Sin conexión: no se ha podido cambiar':e.message)); return; }
+  await renderCalibracionesScreen();
+}
+async function delCalibracion(id) {
+  const ok=await confirmDialog('¿Eliminar este aparato? No se puede deshacer. Los registros que ya se calcularon con él conservan sus valores.',
+    {title:'Eliminar aparato',okText:'Eliminar',okClass:'br'});
+  if(!ok) return;
+  try{
+    await apiPost('/calibraciones',{action:'eliminar',token:LS.token(),payload:{id}});
+    setCloudState('ok'); toast('Aparato eliminado');
+  }catch(e){ toast('⚠ '+(e.isNetwork?'Sin conexión: no se ha podido eliminar':e.message)); }
+  await renderCalibracionesScreen();
+}
+
 let editIrrId=null;
 async function renderIrradiadoresScreen() {
   if(!S.isAdmin){ go('menu'); toast('Solo un administrador puede ver esta pantalla'); return; }

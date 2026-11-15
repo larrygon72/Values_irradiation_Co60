@@ -25,7 +25,82 @@ te dice si estás conectado, sin conexión, o si algo ha fallado.
 
 ---
 
-## 🆕 Versión 2.0 — revisión de seguridad, rendimiento y uso
+## 🆕 Versión 2.1 (zip v5) — calibraciones, dosímetros y correcciones
+
+> **Al actualizar:** ejecuta de nuevo `supabase/schema.sql` en Supabase (es
+> re-ejecutable). Añade la tabla `calibraciones_irradiacion` y las columnas
+> `registros.dosimetros_detalle` y `registros.calibracion_nombre`. Hasta
+> que lo hagas la app sigue funcionando con los valores de siempre.
+
+### 1. Varios aparatos de irradiación (calibraciones)
+
+Hasta ahora la tasa de emisión (Gy/s en una fecha de referencia) estaba
+fija en el código, pensada para un único aparato. Ahora:
+
+- **El aparato original no cambia en nada.** Sus valores (referencia
+  16/10/2024, 0,27621757 Gy/s) siguen en el código como opción siempre
+  disponible — no se puede editar ni borrar — y con él todo da
+  *exactamente* los mismos números de siempre (hay una prueba que lo
+  comprueba bit a bit en varias fechas). Es el que se usa mientras nadie
+  active otro.
+- **Un administrador puede dar de alta otro aparato** en la pantalla nueva
+  **Calibraciones** (menú de administración): nombre, **fecha de
+  referencia** y **tasa en Gy/h** (como suele venir en la ficha del
+  fabricante). La app la convierte sola a Gy/s (÷ 3600) y se ve la
+  conversión mientras se escribe. La desintegración del Co-60 sigue siendo
+  la misma ley que antes: solo cambia el punto de partida.
+- **Elegir cuál está en uso** (con confirmación) y **volver al original en
+  cualquier momento**. Solo hay uno activo a la vez. Es un ajuste global: afecta
+  a los cálculos de todos los usuarios, por eso solo lo gestionan
+  administradores (los demás ven en **Ajustes → Calibración activa** y bajo
+  la tasa del formulario con qué aparato se está calculando).
+- **Los registros ya guardados no cambian.** Cada registro guarda su tasa y
+  sus tiempos, y ahora también *con qué aparato* se calcularon
+  (`registros.calibracion_nombre`; vacío = el original). Antes, al editar
+  un registro, la app recalculaba tasa y tiempos con las constantes del
+  momento; con varios aparatos eso habría cambiado en silencio los números
+  de un registro antiguo. Ahora, al **editar o duplicar** se conservan los
+  valores guardados y el formulario avisa si fueron calculados con otro
+  aparato distinto del activo; si cambias la fecha, entonces sí se
+  recalcula con el activo.
+- Sin conexión, la app sigue calculando con el aparato activo que tenía
+  guardado en el dispositivo (no vuelve en silencio al original, lo que habría
+  dado tiempos distintos sin avisar).
+- Informes: campo nuevo **Calibración (aparato)** y también en la ficha del
+  registro y en las exportaciones del Historial.
+- API: `api/calibraciones.js` (mismo patrón que irradiadores; todo lo que
+  modifica es solo-admin, la lectura es para cualquier usuario; todo queda
+  en la tabla de auditoría).
+
+### 2. Dosímetros
+
+- **Marcar todos como leídos** de golpe: una casilla general en la pantalla
+  de dosímetros que marca o desmarca todos, con estado intermedio cuando hay
+  mezcla; después se puede desmarcar (o marcar) uno suelto.
+- **El detalle ya se ve y se exporta como el resto de valores**: la ficha
+  del registro en el Historial tiene una sección «Dosímetros: lote, hoja y
+  lectura» (tabla por dosímetro + observaciones), y las exportaciones del
+  Historial (CSV/Excel/PDF/registro suelto) ganan columnas al final
+  (*Calibración, Dosím. leídos, Lotes dosím., Hojas dosím., Obs.
+  dosímetros*) sin mover las que ya había.
+- Al guardar, el detalle se ajusta al **nº de dosímetros** (si se bajó,
+  se recortan las filas que sobran; si se subió —o cambió solo al tocar las
+  urnas—, se completan copiando lote/hoja del último, sin marcar como
+  leídas), para que «Nº dosímetros» y los totales por lote/hoja cuadren.
+
+### 3. Corrección: el conductor o el irradiador «desaparecía» al editar
+
+Al abrir desde el Historial un registro antiguo cuyo **irradiador estaba
+desactivado** (o cuyo **conductor ya no existe**), el desplegable no
+tenía esa opción y se quedaba en blanco aunque estuviera guardado. Ahora
+se rescata con el nombre (y código) guardados en el propio registro,
+marcado «(ya no disponible)», y se conserva aunque las listas se
+refresquen varias veces (hay pruebas para ambos casos y para que el texto
+no se vaya degradando).
+
+---
+
+## Versión 2.0 — revisión de seguridad, rendimiento y uso
 
 Esta versión sale de una revisión completa del proyecto (arquitectura,
 lógica, conexiones y diseño). **Todo lo que ya funcionaba sigue igual**:
@@ -224,13 +299,13 @@ es lo de debajo — y unas pocas cosas que se ven.
   (`api/_lib/http.js`: método, sesión, errores), validación
   (`validate.js`), utilidades de base de datos (`db.js`) y auditoría
   (`audit.js`). Cada endpoint queda con solo su lógica.
-- **Pruebas automáticas**: `npm install && npm test` (27 pruebas de la API
+- **Pruebas automáticas**: `npm install && npm test` (29 pruebas de la API
   con una base de datos simulada, sin necesitar Supabase). En
   `tests/e2e/` hay pruebas en navegador real (Chromium) —recorrido por
   todas las pantallas, XSS, sesión, sin conexión, exportaciones, CSP—:
   `npm i --no-save playwright && npx playwright install chromium` y luego
   `node --import ./tests/helpers/register.mjs tests/e2e/smoke.e2e.mjs`
-  (también `features.e2e.mjs`, `extras.e2e.mjs`, `informes.e2e.mjs`, `anuario.e2e.mjs`, `dosimetros.e2e.mjs` y `xss.e2e.mjs`; `anuario.e2e.mjs` necesita además `pdftotext`/`pdfinfo` — del paquete `poppler-utils` — para leer el PDF generado). Ninguna necesita Supabase.
+  (también `features.e2e.mjs`, `extras.e2e.mjs`, `informes.e2e.mjs`, `anuario.e2e.mjs`, `dosimetros.e2e.mjs`, `calibraciones.e2e.mjs` y `xss.e2e.mjs`; `anuario.e2e.mjs` necesita además `pdftotext`/`pdfinfo` — del paquete `poppler-utils` — para leer el PDF generado). Ninguna necesita Supabase.
 - `npm run check` comprueba la sintaxis de todo.
 
 ### Limitaciones conocidas / siguientes pasos recomendados
@@ -400,6 +475,7 @@ api/registros.js      → guardar, listar, editar, eliminar registros
 api/fichajes.js       → control horario
 api/conduccion.js     → viajes y repostajes
 api/irradiadores.js, vehiculos.js, estaciones.js → catálogos
+api/calibraciones.js   → aparatos de irradiación (tasa en Gy/h a una fecha), solo-admin
 api/_lib/             → http.js (envoltorio común), auth.js (sesión),
                         validate.js, db.js, audit.js, supabaseAdmin.js
 supabase/schema.sql   → esquema completo (re-ejecutable)

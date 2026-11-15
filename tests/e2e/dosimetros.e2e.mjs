@@ -61,6 +61,20 @@ await page.check(`${fila(5)} input[type=checkbox]`);
 const leidos = await ev(() => S.dosDetalle.items.map((it) => it.leido).join(","));
 check("«Leído» es independiente por dosímetro (no se copia)", leidos === "false,true,false,false,true,false", leidos);
 
+// «Marcar todos como leídos»: de golpe, y luego se puede desmarcar alguno suelto (estado intermedio)
+const maestro = () => ev(() => ({ marcado: document.getElementById("dosLeidoTodos").checked, mezcla: document.getElementById("dosLeidoTodos").indeterminate }));
+check("Con una mezcla de leídos y no leídos, la casilla general está en estado intermedio", (await maestro()).mezcla === true && (await maestro()).marcado === false);
+await page.check("#dosLeidoTodos"); await w(100);
+check("«Marcar todos como leídos» los marca TODOS de golpe", (await ev(() => S.dosDetalle.items.every((it) => it.leido))) && (await ev(() => [...document.querySelectorAll("#dosItemsBox input[type=checkbox]")].every((c) => c.checked))) && (await maestro()).marcado === true && (await maestro()).mezcla === false);
+await page.uncheck(`${fila(3)} input[type=checkbox]`); await w(100);
+check("…y se puede desmarcar uno suelto: solo ese queda sin leer y la general pasa a intermedia", (await ev(() => S.dosDetalle.items.map((it) => it.leido).join(","))) === "true,true,false,true,true,true" && (await maestro()).mezcla === true);
+await page.check(`${fila(3)} input[type=checkbox]`); await w(100);
+check("Al volver a marcar el último, la general vuelve a quedar marcada del todo", (await maestro()).marcado === true && (await maestro()).mezcla === false);
+await page.uncheck("#dosLeidoTodos"); await w(100);
+check("Desmarcar la general los deja TODOS sin leer", (await ev(() => S.dosDetalle.items.every((it) => !it.leido))) && (await maestro()).marcado === false && (await maestro()).mezcla === false);
+await page.check(`${fila(2)} input[type=checkbox]`); await page.check(`${fila(5)} input[type=checkbox]`); await w(100);
+check("Marcar sueltos de nuevo (2 y 5) deja el estado tal y como lo esperan las comprobaciones de abajo", (await ev(() => S.dosDetalle.items.map((it) => it.leido).join(","))) === "false,true,false,false,true,false");
+
 await page.fill("#dosObs", "Dosímetro nº2 con humedad.");
 await page.click("text=Hecho"); await w(200);
 const resumen = await ev(() => document.getElementById("dosResumen").innerText);
@@ -85,6 +99,52 @@ await ev(() => { stab("irradia", document.querySelector('.step[data-step="irradi
 const resumenEdicion = await ev(() => document.getElementById("dosResumen").innerText);
 check("Al editar, el resumen ya muestra el detalle guardado sin tocar nada", resumenEdicion.includes("6") && resumenEdicion.includes("2 leídos"), resumenEdicion.replace(/\n/g, " | "));
 await ev(() => limpiarForm());
+
+// ═════════ La ficha del Historial muestra el detalle (no "desaparece" al entrar desde ahí) ═════════
+await ev(() => go("hist")); await w(400);
+await ev(() => { document.getElementById("hDesde").value = "2000-01-01"; document.getElementById("hHasta").value = "2100-12-31"; });
+await ev(() => buscarHistorial()); await w(900);
+await ev((id) => abrirDetalleRegistro(id), idGuardado); await w(300);
+const ficha = await ev(() => document.getElementById("detBody").innerText);
+check("La ficha del registro (Historial) muestra la sección de dosímetros con su lote, hoja y lectura", /lote, hoja y lectura/i.test(ficha) && /L-09/.test(ficha) && /Leído/.test(ficha) && /6 detallados/.test(ficha) && /2 leídos/.test(ficha), ficha.replace(/\n+/g, " | ").slice(ficha.search(/Dosímetros: lote/), ficha.search(/Dosímetros: lote/) + 160));
+check("…y sus observaciones", /Dosímetro nº2 con humedad\./.test(ficha));
+const filasFicha = await ev(() => document.querySelectorAll("#detBody .dtbl tbody tr").length);
+check("Una fila por dosímetro en la ficha", filasFicha === 6, String(filasFicha));
+// Un registro SIN detalle no enseña una sección vacía
+db.tables.registros.push({ id: crypto.randomUUID(), created_at: new Date().toISOString(), fecha_irradiacion: "2026-03-05", semana_iso: 10, creado_por: "Admin", dosimetros: 2, dosimetros_detalle: null });
+await ev(() => buscarHistorial()); await w(900);
+await ev((id) => abrirDetalleRegistro(id), db.t("registros")[db.t("registros").length - 1].id); await w(300);
+check("Un registro sin detalle de dosímetros no muestra la sección", !/lote, hoja y lectura/i.test(await ev(() => document.getElementById("detBody").innerText)));
+await ev(() => cerrarDetalleRegistro()); await w(200);
+// Exportaciones del Historial: columnas nuevas al final (las de siempre no se mueven)
+const hdr = await ev(() => buildHistRows([S.histRaw.find((r) => r.id === S.detRegistro.id) || S.histRaw[0]]).header);
+check("Las exportaciones del Historial ganan columnas de dosímetros al FINAL, sin mover las anteriores", hdr[hdr.length - 5] === "Calibración" && hdr[hdr.length - 4] === "Dosím. leídos" && hdr[hdr.length - 3] === "Lotes dosím." && hdr[hdr.length - 6] === "Observaciones", hdr.slice(-7).join(" | "));
+const filaExp = await ev((id) => buildHistRows([S.histRaw.find((r) => r.id === id)]).rows[0], idGuardado);
+check("…con los valores del registro (2 leídos, lote L-09, hojas 12 y 13)", filaExp[filaExp.length - 4] === 2 && filaExp[filaExp.length - 3] === "L-09" && /12, 13/.test(filaExp[filaExp.length - 2]), filaExp.slice(-5).join(" | "));
+
+// ═════════ Cambiar el nº de dosímetros DESPUÉS de rellenar el detalle: lo guardado cuadra con el nº ═════════
+await ev(() => go("form")); await w(400);
+await ev(() => { stab("irradia", document.querySelector('.step[data-step="irradia"]')); }); await w(200);
+await page.fill("#fDos", "4"); await page.click(".dos-detalle-btn"); await w(200);
+await page.fill(`${fila(1)} input[data-campo=lote]`, "L-77"); await page.fill(`${fila(1)} input[data-campo=hoja]`, "5");
+await page.click("text=Hecho"); await w(200);
+await page.fill("#fDos", "2"); // menos dosímetros que filas de detalle
+await ev(() => { stab("urnas", document.querySelector('.step[data-step="urnas"]')); }); await w(200);
+await page.fill("#fchIrr", "2026-03-09"); await ev(() => onFecha());
+await ev(() => guardar()); await w(900);
+const recortado = db.t("registros").find((r) => r.fecha_irradiacion === "2026-03-09");
+check("Si se baja el nº de dosímetros tras rellenar el detalle, se guarda recortado a ese nº", recortado && recortado.dosimetros === 2 && recortado.dosimetros_detalle.items.length === 2 && recortado.dosimetros_detalle.items[0].lote === "L-77", JSON.stringify(recortado?.dosimetros_detalle?.items));
+await ev(() => go("form")); await w(300);
+await ev(() => { stab("irradia", document.querySelector('.step[data-step="irradia"]')); }); await w(200);
+await page.fill("#fDos", "2"); await page.click(".dos-detalle-btn"); await w(200);
+await page.fill(`${fila(2)} input[data-campo=lote]`, "L-88"); await page.fill(`${fila(2)} input[data-campo=hoja]`, "6");
+await page.click("text=Hecho"); await w(200);
+await page.fill("#fDos", "4"); // más dosímetros que filas de detalle
+await ev(() => { stab("urnas", document.querySelector('.step[data-step="urnas"]')); }); await w(200);
+await page.fill("#fchIrr", "2026-03-10"); await ev(() => onFecha());
+await ev(() => guardar()); await w(900);
+const ampliado = db.t("registros").find((r) => r.fecha_irradiacion === "2026-03-10");
+check("Si se sube el nº de dosímetros, el detalle se completa copiando lote/hoja del último y sin marcar como leídos", ampliado && ampliado.dosimetros_detalle.items.length === 4 && ampliado.dosimetros_detalle.items[3].lote === "L-88" && ampliado.dosimetros_detalle.items[3].hoja === "6" && ampliado.dosimetros_detalle.items[3].leido === false, JSON.stringify(ampliado?.dosimetros_detalle?.items));
 
 // ═════════ Más datos para probar Informes (varios registros, con y sin detalle) ═════════
 const AHORA = new Date().toISOString();

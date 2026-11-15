@@ -37,6 +37,23 @@ function urna(u) {
   };
 }
 
+// Detalle de dosímetros: {observaciones, items:[{lote,hoja,leido}]}. El lote y la hoja normalmente
+// son los mismos para todos los dosímetros del registro, pero se guardan POR DOSÍMETRO porque
+// pueden cambiar a mitad de una serie; "leído" es siempre independiente de cada uno. No se exige
+// que el número de items coincida con "dosimetros" (el usuario puede estar completando el detalle
+// poco a poco) — solo se acota un máximo para que nadie pueda mandar un array desmedido.
+function dosimetrosDetalle(d) {
+  if (!d || typeof d !== "object") return null;
+  const items = (Array.isArray(d.items) ? d.items : []).slice(0, 1000).map((it) => ({
+    lote: texto(it?.lote ?? "", { max: 40, etiqueta: "El lote del dosímetro" }),
+    hoja: texto(it?.hoja ?? "", { max: 20, etiqueta: "La hoja del dosímetro" }),
+    leido: !!(it && it.leido),
+  }));
+  const observaciones = texto(d.observaciones ?? "", { max: 2000, multilinea: true, etiqueta: "Las observaciones de los dosímetros" });
+  if (!items.length && !observaciones) return null;
+  return { observaciones: observaciones || null, items };
+}
+
 // Convierte el registro que envía el navegador en la fila de la tabla, validando cada campo.
 function filaDesdeRegistro(r) {
   return {
@@ -65,6 +82,8 @@ function filaDesdeRegistro(r) {
     irradiador_nombre: texto(r.irrNombre, { max: 200 }) || null,
     irradiador_codigo: texto(r.irrCodigo, { max: 5 }) || null,
     dosimetros: numero(r.dos, { min: 0, max: 10000, entero: true, etiqueta: "El número de dosímetros" }),
+    dosimetros_detalle: dosimetrosDetalle(r.dosDetalle),
+    calibracion_nombre: texto(r.calibNombre, { max: 120, etiqueta: "La calibración" }) || null,
     h_inicio_irr: hora(r.hIni, "La hora de inicio de la irradiación"),
     h_fin_irr: hora(r.hFin, "La hora de fin de la irradiación"),
     observaciones: texto(r.obs, { max: 5000, multilinea: true, etiqueta: "Las observaciones" }) || null,

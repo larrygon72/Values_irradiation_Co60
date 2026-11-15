@@ -35,11 +35,11 @@ if (!esOriginal) await page.waitForSelector("#smenu.on", { timeout: 4000 }).catc
 else await page.evaluate(() => go("menu"));
 
 let literales = 0;
-const pantallas = ["menu", "records", "hist", "informes", "users", "vehiculos", "estaciones", "irradiadores", "conduccion", "fichaje"];
+const pantallas = ["menu", "records", "hist", "informes", "users", "vehiculos", "estaciones", "irradiadores", "calibraciones", "conduccion", "fichaje", "settings"];
 for (const p of pantallas) {
   await page.evaluate((id) => { try { go(id); } catch (e) {} }, p).catch(() => {});
   await page.waitForTimeout(500);
-  if (p === "hist") { await page.evaluate(() => { try { buscarHistorial(); } catch (e) {} }); await page.waitForTimeout(500); await page.evaluate(() => { const r = document.querySelector("#histTableBody tr[onclick], #histList .ritem"); if (r) r.click(); }); await page.waitForTimeout(300); await page.evaluate(() => { try { cerrarDetalleRegistro(); } catch (e) {} }); }
+  if (p === "hist") { await page.evaluate(() => { try { buscarHistorial(); } catch (e) {} }); await page.waitForTimeout(600); await page.evaluate(() => { try { (S.histRaw || []).forEach((r) => abrirDetalleRegistro(r.id)); cerrarDetalleRegistro(); } catch (e) {} }); await page.waitForTimeout(300); }
   if (p === "informes") { await page.evaluate(() => { try { buscarInformes(); } catch (e) {} }); await page.waitForTimeout(500); }
   if (p === "conduccion") { await page.evaluate(() => { try { cargarListaConduccion?.(); } catch (e) {} }); await page.waitForTimeout(300); }
   // Simular el ratón / clics sobre los elementos con manejadores inline (por si el payload va en un atributo)

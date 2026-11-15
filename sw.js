@@ -12,7 +12,7 @@
 //  - Imágenes: "caché primero" con actualización en segundo plano.
 //  - /api/* nunca se intercepta: siempre va directo a la red.
 
-const CACHE_NAME = 'vi-web210-v3';
+const CACHE_NAME = 'vi-web210-v4';
 const APP_SHELL = [
   './',
   './index.html',
